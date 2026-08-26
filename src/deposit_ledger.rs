@@ -5,7 +5,9 @@
 
 use crate::error::{EngineError, Result};
 use crate::exchange::{ConfirmedDeposit, UtxoAppearance};
+use crate::network::is_valid_testnet_address;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use std::collections::HashSet;
 use std::path::Path;
 use std::time::Duration;
 
@@ -410,6 +412,51 @@ impl DepositLedger {
         Ok(outpoints)
     }
 
+    pub fn pending_outpoints_for_addresses(
+        &self,
+        addresses: &[String],
+    ) -> Result<Vec<(String, u32)>> {
+        if addresses.is_empty() || addresses.len() > 100 {
+            return Err(EngineError::Message(
+                "pending outpoint scope requires 1-100 addresses".into(),
+            ));
+        }
+        let mut watched = HashSet::with_capacity(addresses.len());
+        for address in addresses {
+            if !is_valid_testnet_address(address) {
+                return Err(EngineError::NotTestnetAddress(address.clone()));
+            }
+            if !watched.insert(address.as_str()) {
+                return Err(EngineError::Message(format!(
+                    "duplicate pending outpoint address {address}"
+                )));
+            }
+        }
+        let mut statement = self.conn.prepare(
+            "SELECT tx_id, output_index, address FROM deposits
+             WHERE state='pending' ORDER BY tx_id, output_index",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        let mut outpoints = Vec::new();
+        for row in rows {
+            let (tx_id, output_index, address) = row?;
+            if watched.contains(address.as_str()) {
+                outpoints.push((
+                    tx_id,
+                    u32::try_from(output_index)
+                        .map_err(|_| EngineError::Message("invalid SQLite output index".into()))?,
+                ));
+            }
+        }
+        Ok(outpoints)
+    }
+
     pub fn unacknowledged_events(&self) -> Result<Vec<LedgerEvent>> {
         let mut statement = self.conn.prepare(
             "SELECT id, event_key, kind, tx_id, output_index, amount_sompi, address
@@ -681,6 +728,10 @@ fn to_i64(value: u64, label: &str) -> Result<i64> {
 mod tests {
     use super::*;
 
+    const ADDRESS: &str = "kaspatest:qptv6u8kel95drh2p2z492cyksk8lpetep286fngqu5j9nk57g642lzf748kt";
+    const ADDRESS_2: &str =
+        "kaspatest:qqmstl2znv9tsfgcmj9shme82my867tapz7pdu4ztwdn6sm9452jj5mm0sxzw";
+
     fn observed(daa: u64) -> UtxoAppearance {
         UtxoAppearance {
             tx_id: "tx".into(),
@@ -837,6 +888,34 @@ mod tests {
         assert!(ledger.reconcile(101, &[changed], &[], &[]).is_err());
         assert_eq!(ledger.pending_count().unwrap(), 1);
         assert_eq!(ledger.pending_outpoints().unwrap(), vec![("tx".into(), 0)]);
+    }
+
+    #[test]
+    fn pending_outpoint_scope_never_crosses_watched_addresses() {
+        let mut ledger = DepositLedger::open(":memory:").unwrap();
+        let mut first = observed(100);
+        first.tx_id = "first".into();
+        first.address = ADDRESS.into();
+        let mut second = observed(100);
+        second.tx_id = "second".into();
+        second.address = ADDRESS_2.into();
+        ledger.reconcile(100, &[first, second], &[], &[]).unwrap();
+
+        assert_eq!(
+            ledger
+                .pending_outpoints_for_addresses(&[ADDRESS.into()])
+                .unwrap(),
+            vec![("first".into(), 0)]
+        );
+        assert_eq!(
+            ledger
+                .pending_outpoints_for_addresses(&[ADDRESS_2.into()])
+                .unwrap(),
+            vec![("second".into(), 0)]
+        );
+        assert!(ledger
+            .pending_outpoints_for_addresses(&[ADDRESS.into(), ADDRESS.into()])
+            .is_err());
     }
 
     #[test]

@@ -23,7 +23,7 @@ const MESSAGE_TIMEOUT: Duration = Duration::from_secs(30);
 const RESNAPSHOT_INTERVAL: Duration = Duration::from_secs(60);
 
 struct Options {
-    address: String,
+    addresses: Vec<String>,
     url: String,
     rest: String,
     database: PathBuf,
@@ -31,7 +31,7 @@ struct Options {
 }
 
 fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, String> {
-    let mut address = None;
+    let mut addresses = Vec::new();
     let mut url = format!("ws://127.0.0.1:{TN10_WRPC_JSON}");
     let mut rest = TESTNET_10_REST.to_string();
     let mut database = PathBuf::from(".local/tn10-wrpc-live.sqlite");
@@ -44,17 +44,27 @@ fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, St
             "--database" => database = PathBuf::from(args.next().ok_or("--database needs a path")?),
             "--resnapshot-only" => resnapshot_only = true,
             _ if argument.starts_with('-') => return Err(format!("unknown flag {argument}")),
-            _ if address.is_none() => address = Some(argument),
-            _ => return Err(usage().into()),
+            _ => addresses.push(argument),
         }
     }
-    let address = address.ok_or_else(|| usage().to_string())?;
-    if !is_valid_testnet_address(&address) {
-        return Err("ADDRESS must be a checksummed kaspatest address".into());
+    if addresses.is_empty() || addresses.len() > kaspa_frontier_engine::rest::MAX_ADDRESS_BATCH {
+        return Err(format!(
+            "tn10-wrpc-live requires 1-{} addresses",
+            kaspa_frontier_engine::rest::MAX_ADDRESS_BATCH
+        ));
+    }
+    let mut unique = HashSet::with_capacity(addresses.len());
+    for address in &addresses {
+        if !is_valid_testnet_address(address) {
+            return Err(format!("{address} must be a checksummed kaspatest address"));
+        }
+        if !unique.insert(address) {
+            return Err(format!("duplicate watched address {address}"));
+        }
     }
     require_loopback_wrpc_url(&url).map_err(|error| error.to_string())?;
     Ok(Options {
-        address,
+        addresses,
         url,
         rest,
         database,
@@ -63,26 +73,25 @@ fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, St
 }
 
 fn usage() -> &'static str {
-    "usage: tn10-wrpc-live ADDRESS [--url ws://127.0.0.1:18210] [--rest HTTPS] [--database PATH] [--resnapshot-only]"
+    "usage: tn10-wrpc-live ADDRESS [ADDRESS ...] [--url ws://127.0.0.1:18210] [--rest HTTPS] [--database PATH] [--resnapshot-only]"
 }
 
 async fn resnapshot(
     rest: &Tn10RestClient,
-    address: &str,
+    addresses: &[String],
     projection: &mut WrpcDepositProjection,
     ledger: &mut DepositLedger,
 ) -> kaspa_frontier_engine::Result<()> {
-    let addresses = [address.to_string()];
-    let (dag, utxos) = tokio::join!(rest.block_dag_info(), rest.utxos_for_addresses(&addresses));
+    let (dag, utxos) = tokio::join!(rest.block_dag_info(), rest.utxos_for_addresses(addresses));
     let dag = dag?;
     require_tn10(&dag.network_name)?;
-    let mut snapshot = projection.bootstrap(dag.virtual_daa_score, &utxos?, address)?;
+    let mut snapshot = projection.bootstrap_addresses(dag.virtual_daa_score, &utxos?, addresses)?;
     let current: HashSet<_> = snapshot
         .observed
         .iter()
         .map(|entry| (entry.tx_id.clone(), entry.output_index))
         .collect();
-    for pending in ledger.pending_outpoints()? {
+    for pending in ledger.pending_outpoints_for_addresses(addresses)? {
         if !current.contains(&pending) && !snapshot.disappeared_outpoints.contains(&pending) {
             snapshot.disappeared_outpoints.push(pending);
         }
@@ -99,7 +108,7 @@ fn replay_pending_after_resnapshot(
     journal: &mut WrpcJournal,
     projection: &mut WrpcDepositProjection,
     source: &str,
-    address: &str,
+    addresses: &[String],
 ) -> kaspa_frontier_engine::Result<WrpcReplayReport> {
     let checkpoint = journal.checkpoint(source)?;
     let frames = journal.frames(source)?;
@@ -109,7 +118,7 @@ fn replay_pending_after_resnapshot(
             continue;
         }
         let notification = decode_notification(&frame.raw_json)?;
-        let delta = projection.apply_after_resnapshot(notification, address)?;
+        let delta = projection.apply_after_resnapshot_addresses(notification, addresses)?;
         debug_assert!(delta.is_none());
         validated_through = Some(frame.sequence);
     }
@@ -129,10 +138,10 @@ fn apply_live_frame(
     ledger: &mut DepositLedger,
     projection: &mut WrpcDepositProjection,
     source: &str,
-    address: &str,
+    addresses: &[String],
 ) -> kaspa_frontier_engine::Result<()> {
     let notification = decode_notification(raw)?;
-    if let Some(snapshot) = projection.apply(notification, address)? {
+    if let Some(snapshot) = projection.apply_addresses(notification, addresses)? {
         let sequence = journal.append(source, raw)?;
         ledger.reconcile(
             snapshot.virtual_daa,
@@ -192,7 +201,7 @@ async fn run_connection(
     .await
     .map_err(|_| "wRPC connect timeout")??;
 
-    let utxo_request = encode_notify_utxos_changed(1, std::slice::from_ref(&options.address))?;
+    let utxo_request = encode_notify_utxos_changed(1, &options.addresses)?;
     let daa_request = encode_notify_virtual_daa_score_changed(2)?;
     socket.send(Message::Text(utxo_request.into())).await?;
     socket.send(Message::Text(daa_request.into())).await?;
@@ -212,17 +221,27 @@ async fn run_connection(
                 daa_ack = true;
             }
             Some(id) => return Err(format!("unexpected wRPC response id {id}").into()),
-            None => apply_live_frame(&raw, journal, ledger, projection, source, &options.address)?,
+            None => apply_live_frame(
+                &raw,
+                journal,
+                ledger,
+                projection,
+                source,
+                &options.addresses,
+            )?,
         }
     }
-    println!("subscribed  UTXOs + virtual DAA");
+    println!(
+        "subscribed  {} addresses + virtual DAA",
+        options.addresses.len()
+    );
 
     let mut resnapshot_interval = tokio::time::interval(RESNAPSHOT_INTERVAL);
     resnapshot_interval.tick().await;
     loop {
         tokio::select! {
             _ = resnapshot_interval.tick() => {
-                resnapshot(rest, &options.address, projection, ledger).await?;
+                resnapshot(rest, &options.addresses, projection, ledger).await?;
                 println!(
                     "resnapshot  live={} checkpoint={}",
                     projection.live_count(),
@@ -240,7 +259,7 @@ async fn run_connection(
                         ledger,
                         projection,
                         source,
-                        &options.address,
+                        &options.addresses,
                     )?,
                     Message::Ping(payload) => socket.send(Message::Pong(payload)).await?,
                     Message::Pong(_) => {}
@@ -257,6 +276,19 @@ async fn run_connection(
     }
 }
 
+fn source_for_addresses(addresses: &[String]) -> String {
+    let mut canonical = addresses.to_vec();
+    canonical.sort();
+    let mut hash = 0xcbf29ce484222325u64;
+    for address in &canonical {
+        for byte in address.bytes().chain(std::iter::once(0)) {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+    }
+    format!("owned-node:{}:{hash:016x}", canonical.len())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let options =
@@ -267,15 +299,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let rest = Tn10RestClient::new(&options.rest)?;
-    let source = format!("owned-node:{}", options.address);
+    let source = source_for_addresses(&options.addresses);
     let mut journal = WrpcJournal::open(&options.database)?;
     let mut ledger = DepositLedger::open(&options.database)?;
     let mut projection = WrpcDepositProjection::default();
 
-    resnapshot(&rest, &options.address, &mut projection, &mut ledger).await?;
-    let replay =
-        replay_pending_after_resnapshot(&mut journal, &mut projection, &source, &options.address)?;
+    resnapshot(&rest, &options.addresses, &mut projection, &mut ledger).await?;
+    let replay = replay_pending_after_resnapshot(
+        &mut journal,
+        &mut projection,
+        &source,
+        &options.addresses,
+    )?;
     println!("database    {}", options.database.display());
+    println!("addresses   {}", options.addresses.len());
     println!(
         "resnapshot  live={} checkpoint={}",
         replay.live_utxos, replay.checkpoint
@@ -305,7 +342,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         tokio::time::sleep(delay).await;
         delay = (delay * 2).min(Duration::from_secs(30));
-        if let Err(error) = resnapshot(&rest, &options.address, &mut projection, &mut ledger).await
+        if let Err(error) =
+            resnapshot(&rest, &options.addresses, &mut projection, &mut ledger).await
         {
             eprintln!("REST resnapshot retry required: {error}");
             continue;
@@ -314,7 +352,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &mut journal,
             &mut projection,
             &source,
-            &options.address,
+            &options.addresses,
         ) {
             Ok(replay) => replay,
             Err(error) => {
@@ -334,6 +372,12 @@ mod tests {
     use super::*;
 
     const ADDRESS: &str = "kaspatest:qptv6u8kel95drh2p2z492cyksk8lpetep286fngqu5j9nk57g642lzf748kt";
+    const ADDRESS_2: &str =
+        "kaspatest:qqmstl2znv9tsfgcmj9shme82my867tapz7pdu4ztwdn6sm9452jj5mm0sxzw";
+
+    fn watched() -> Vec<String> {
+        vec![ADDRESS.into()]
+    }
 
     #[test]
     fn cli_restricts_cleartext_wrpc_to_loopback() {
@@ -355,6 +399,22 @@ mod tests {
         .unwrap();
         assert!(options.resnapshot_only);
         assert_eq!(options.url, "ws://127.0.0.1:18210");
+        assert_eq!(options.addresses, watched());
+    }
+
+    #[test]
+    fn cli_accepts_bounded_unique_address_batches() {
+        let options = parse_args([ADDRESS.into(), ADDRESS_2.into()]).unwrap();
+        assert_eq!(options.addresses, vec![ADDRESS, ADDRESS_2]);
+        assert!(parse_args([ADDRESS.into(), ADDRESS.into()]).is_err());
+        assert_eq!(
+            source_for_addresses(&[ADDRESS.into(), ADDRESS_2.into()]),
+            source_for_addresses(&[ADDRESS_2.into(), ADDRESS.into()])
+        );
+        assert_ne!(
+            source_for_addresses(&[ADDRESS.into()]),
+            source_for_addresses(&[ADDRESS.into(), ADDRESS_2.into()])
+        );
     }
 
     #[test]
@@ -371,7 +431,7 @@ mod tests {
         let mut projection = WrpcDepositProjection::default();
         projection.bootstrap(160, &[], ADDRESS).unwrap();
         let report =
-            replay_pending_after_resnapshot(&mut journal, &mut projection, "live", ADDRESS)
+            replay_pending_after_resnapshot(&mut journal, &mut projection, "live", &watched())
                 .unwrap();
         assert_eq!(report.checkpoint, 4);
         assert_eq!(report.live_utxos, 0);
@@ -394,7 +454,7 @@ mod tests {
             &mut ledger,
             &mut projection,
             "live",
-            ADDRESS,
+            &watched(),
         )
         .unwrap();
         assert_eq!(journal.checkpoint("live").unwrap(), 1);
@@ -406,7 +466,7 @@ mod tests {
             &mut ledger,
             &mut projection,
             "live",
-            ADDRESS,
+            &watched(),
         )
         .unwrap();
         assert_eq!(journal.checkpoint("live").unwrap(), 2);
@@ -419,10 +479,71 @@ mod tests {
             &mut ledger,
             &mut projection,
             "live",
-            ADDRESS,
+            &watched(),
         )
         .unwrap();
         assert_eq!(journal.checkpoint("live").unwrap(), 3);
+        assert_eq!(ledger.pending_count().unwrap(), 2);
+        assert!(ledger.unacknowledged_events().unwrap().is_empty());
+    }
+
+    #[test]
+    fn multi_address_restart_replays_without_cross_credit() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("multi.sqlite");
+        let addresses = vec![ADDRESS.into(), ADDRESS_2.into()];
+        let source = source_for_addresses(&addresses);
+        {
+            let mut journal = WrpcJournal::open(&database).unwrap();
+            let mut ledger = DepositLedger::open(&database).unwrap();
+            let mut projection = WrpcDepositProjection::default();
+            let mut fixture = include_str!("../../fixtures/wrpc-utxos-replay.jsonl").lines();
+            let daa = fixture.next().unwrap();
+            let added = fixture.next().unwrap().replacen(ADDRESS, ADDRESS_2, 1);
+            apply_live_frame(
+                daa,
+                &mut journal,
+                &mut ledger,
+                &mut projection,
+                &source,
+                &addresses,
+            )
+            .unwrap();
+            apply_live_frame(
+                &added,
+                &mut journal,
+                &mut ledger,
+                &mut projection,
+                &source,
+                &addresses,
+            )
+            .unwrap();
+            assert_eq!(ledger.pending_count().unwrap(), 2);
+            assert_eq!(
+                ledger
+                    .pending_outpoints_for_addresses(&[ADDRESS.into()])
+                    .unwrap(),
+                vec![("b".repeat(64), 1)]
+            );
+            assert_eq!(
+                ledger
+                    .pending_outpoints_for_addresses(&[ADDRESS_2.into()])
+                    .unwrap(),
+                vec![("a".repeat(64), 0)]
+            );
+        }
+
+        let mut journal = WrpcJournal::open(&database).unwrap();
+        let mut ledger = DepositLedger::open(&database).unwrap();
+        let report = kaspa_frontier_engine::replay_into_ledger_addresses(
+            &mut journal,
+            &mut ledger,
+            &source,
+            &addresses,
+        )
+        .unwrap();
+        assert_eq!(report.checkpoint, 2);
+        assert_eq!(report.live_utxos, 2);
         assert_eq!(ledger.pending_count().unwrap(), 2);
         assert!(ledger.unacknowledged_events().unwrap().is_empty());
     }
@@ -442,7 +563,7 @@ mod tests {
             &mut ledger,
             &mut projection,
             "throughput",
-            ADDRESS,
+            &watched(),
         )
         .unwrap();
 
@@ -457,7 +578,7 @@ mod tests {
                 &mut ledger,
                 &mut projection,
                 "throughput",
-                ADDRESS,
+                &watched(),
             )
             .unwrap();
         }

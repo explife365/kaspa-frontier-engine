@@ -763,12 +763,21 @@ pub fn replay_into_ledger(
     source: &str,
     watched_address: &str,
 ) -> Result<WrpcReplayReport> {
+    replay_into_ledger_addresses(journal, ledger, source, &[watched_address.to_string()])
+}
+
+pub fn replay_into_ledger_addresses(
+    journal: &mut WrpcJournal,
+    ledger: &mut DepositLedger,
+    source: &str,
+    watched_addresses: &[String],
+) -> Result<WrpcReplayReport> {
     let starting_checkpoint = journal.checkpoint(source)?;
     let frames = journal.frames(source)?;
     let mut projection = WrpcDepositProjection::default();
     for frame in &frames {
         let notification = decode_notification(&frame.raw_json)?;
-        let snapshot = projection.apply(notification, watched_address)?;
+        let snapshot = projection.apply_addresses(notification, watched_addresses)?;
         if frame.sequence <= starting_checkpoint {
             continue;
         }
@@ -796,13 +805,20 @@ impl WrpcDepositProjection {
         utxos: &[AddressUtxo],
         watched_address: &str,
     ) -> Result<WrpcDepositSnapshot> {
-        if !is_valid_testnet_address(watched_address) {
-            return Err(EngineError::NotTestnetAddress(watched_address.into()));
-        }
+        self.bootstrap_addresses(virtual_daa, utxos, &[watched_address.to_string()])
+    }
+
+    pub fn bootstrap_addresses(
+        &mut self,
+        virtual_daa: u64,
+        utxos: &[AddressUtxo],
+        watched_addresses: &[String],
+    ) -> Result<WrpcDepositSnapshot> {
+        let watched = validate_watched_addresses(watched_addresses)?;
         let previous: HashSet<_> = self.live.keys().cloned().collect();
         let mut replacement = BTreeMap::new();
         for utxo in utxos {
-            if utxo.address != watched_address {
+            if !watched.contains(utxo.address.as_str()) {
                 return Err(EngineError::Message(format!(
                     "REST resnapshot returned foreign address {}",
                     utxo.address
@@ -863,7 +879,16 @@ impl WrpcDepositProjection {
         notification: WrpcNotification,
         watched_address: &str,
     ) -> Result<Option<WrpcDepositSnapshot>> {
-        self.apply_strict(notification, watched_address)
+        self.apply_addresses(notification, &[watched_address.to_string()])
+    }
+
+    pub fn apply_addresses(
+        &mut self,
+        notification: WrpcNotification,
+        watched_addresses: &[String],
+    ) -> Result<Option<WrpcDepositSnapshot>> {
+        let watched = validate_watched_addresses(watched_addresses)?;
+        self.apply_strict(notification, &watched)
     }
 
     /// Validate a pending frame after a fresh REST resnapshot without mutating the
@@ -873,12 +898,18 @@ impl WrpcDepositProjection {
         notification: WrpcNotification,
         watched_address: &str,
     ) -> Result<Option<WrpcDepositSnapshot>> {
-        if !is_valid_testnet_address(watched_address) {
-            return Err(EngineError::NotTestnetAddress(watched_address.into()));
-        }
+        self.apply_after_resnapshot_addresses(notification, &[watched_address.to_string()])
+    }
+
+    pub fn apply_after_resnapshot_addresses(
+        &mut self,
+        notification: WrpcNotification,
+        watched_addresses: &[String],
+    ) -> Result<Option<WrpcDepositSnapshot>> {
+        let watched = validate_watched_addresses(watched_addresses)?;
         if let WrpcNotification::UtxosChanged { added, removed } = notification {
             for entry in added.iter().chain(&removed) {
-                require_watched(entry, watched_address)?;
+                require_watched(entry, &watched)?;
             }
         }
         Ok(None)
@@ -887,11 +918,8 @@ impl WrpcDepositProjection {
     fn apply_strict(
         &mut self,
         notification: WrpcNotification,
-        watched_address: &str,
+        watched: &HashSet<&str>,
     ) -> Result<Option<WrpcDepositSnapshot>> {
-        if !is_valid_testnet_address(watched_address) {
-            return Err(EngineError::NotTestnetAddress(watched_address.into()));
-        }
         let mut observed = Vec::new();
         let mut confirmed = Vec::new();
         let mut disappeared = Vec::new();
@@ -932,7 +960,7 @@ impl WrpcDepositProjection {
             }
             WrpcNotification::UtxosChanged { added, removed } => {
                 for entry in removed {
-                    require_watched(&entry, watched_address)?;
+                    require_watched(&entry, watched)?;
                     let key = (entry.outpoint.transaction_id.clone(), entry.outpoint.index);
                     let Some(existing) = self.live.get(&key) else {
                         disappeared.push(key);
@@ -951,7 +979,7 @@ impl WrpcDepositProjection {
                     }
                 }
                 for entry in added {
-                    require_watched(&entry, watched_address)?;
+                    require_watched(&entry, watched)?;
                     let key = (entry.outpoint.transaction_id.clone(), entry.outpoint.index);
                     if let Some(existing) = self.live.get(&key) {
                         if !same_entry(existing, &entry) {
@@ -1024,10 +1052,35 @@ impl WrpcDepositProjection {
     }
 }
 
-fn require_watched(entry: &RpcUtxoEntryRef, watched: &str) -> Result<()> {
-    if entry.address.as_deref() != Some(watched) {
+fn validate_watched_addresses(addresses: &[String]) -> Result<HashSet<&str>> {
+    if addresses.is_empty() || addresses.len() > 100 {
+        return Err(EngineError::Message(
+            "wRPC projection requires 1-100 watched addresses".into(),
+        ));
+    }
+    let mut watched = HashSet::with_capacity(addresses.len());
+    for address in addresses {
+        if !is_valid_testnet_address(address) {
+            return Err(EngineError::NotTestnetAddress(address.clone()));
+        }
+        if !watched.insert(address.as_str()) {
+            return Err(EngineError::Message(format!(
+                "duplicate wRPC watched address {address}"
+            )));
+        }
+    }
+    Ok(watched)
+}
+
+fn require_watched(entry: &RpcUtxoEntryRef, watched: &HashSet<&str>) -> Result<()> {
+    if !entry
+        .address
+        .as_deref()
+        .is_some_and(|address| watched.contains(address))
+    {
         return Err(EngineError::Message(format!(
-            "wRPC entry is outside watched address {watched}"
+            "wRPC entry is outside watched address set: {}",
+            entry.address.as_deref().unwrap_or("<missing>")
         )));
     }
     Ok(())
@@ -1093,6 +1146,29 @@ mod tests {
     use super::*;
 
     const ADDRESS: &str = "kaspatest:qptv6u8kel95drh2p2z492cyksk8lpetep286fngqu5j9nk57g642lzf748kt";
+    const ADDRESS_2: &str =
+        "kaspatest:qqmstl2znv9tsfgcmj9shme82my867tapz7pdu4ztwdn6sm9452jj5mm0sxzw";
+
+    fn entry(address: &str, transaction_id: &str, index: u32) -> RpcUtxoEntryRef {
+        RpcUtxoEntryRef {
+            address: Some(address.into()),
+            outpoint: RpcOutpoint {
+                transaction_id: transaction_id.into(),
+                index,
+            },
+            utxo_entry: RpcUtxoEntry {
+                amount: 1_000,
+                script_public_key: RpcScriptPublicKey {
+                    script_public_key: Some("20ab".into()),
+                    version: 0,
+                },
+                block_daa_score: 100,
+                is_coinbase: false,
+                covenant_id: None,
+                storage_mass: None,
+            },
+        }
+    }
 
     fn added_frame() -> String {
         format!(
@@ -1281,6 +1357,75 @@ mod tests {
         let snapshot = projection.apply(unknown, ADDRESS).unwrap().unwrap();
         assert_eq!(snapshot.disappeared_outpoints.len(), 1);
         assert_eq!(projection.live_count(), 1);
+    }
+
+    #[test]
+    fn multi_address_projection_preserves_attribution_and_rejects_foreign_entries() {
+        let addresses = vec![ADDRESS.into(), ADDRESS_2.into()];
+        let mut projection = WrpcDepositProjection::default();
+        projection
+            .apply_addresses(
+                WrpcNotification::VirtualDaaScoreChanged {
+                    virtual_daa_score: 100,
+                },
+                &addresses,
+            )
+            .unwrap();
+        let first = entry(ADDRESS, &"1".repeat(64), 0);
+        let second = entry(ADDRESS_2, &"2".repeat(64), 1);
+        let snapshot = projection
+            .apply_addresses(
+                WrpcNotification::UtxosChanged {
+                    added: vec![first.clone(), second.clone()],
+                    removed: Vec::new(),
+                },
+                &addresses,
+            )
+            .unwrap()
+            .unwrap();
+        let observed_addresses: HashSet<_> = snapshot
+            .observed
+            .iter()
+            .map(|appearance| appearance.address.as_str())
+            .collect();
+        assert_eq!(observed_addresses, HashSet::from([ADDRESS, ADDRESS_2]));
+        assert_eq!(projection.live_count(), 2);
+
+        let removed = projection
+            .apply_addresses(
+                WrpcNotification::UtxosChanged {
+                    added: Vec::new(),
+                    removed: vec![second],
+                },
+                &addresses,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(removed.disappeared_outpoints, vec![("2".repeat(64), 1)]);
+        assert_eq!(projection.live_count(), 1);
+
+        let foreign = entry(
+            "kaspatest:qz0rvcmqn8z3sysq5t0vl4wguznl4t9q833th2mc3u7aunm5qg2nqwj5lrln4",
+            &"3".repeat(64),
+            0,
+        );
+        assert!(projection
+            .apply_addresses(
+                WrpcNotification::UtxosChanged {
+                    added: vec![foreign],
+                    removed: Vec::new(),
+                },
+                &addresses,
+            )
+            .is_err());
+        assert!(projection
+            .apply_addresses(
+                WrpcNotification::VirtualDaaScoreChanged {
+                    virtual_daa_score: 101,
+                },
+                &[ADDRESS.into(), ADDRESS.into()],
+            )
+            .is_err());
     }
 
     #[test]

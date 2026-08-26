@@ -78,7 +78,7 @@ pub use withdrawal_ledger::{WithdrawalLedger, WithdrawalRecord, WithdrawalState}
 pub use wrpc::{
     decode_block_dag_info_response, decode_notification, decode_server_info_response,
     encode_get_block_dag_info, encode_get_server_info, encode_notify_utxos_changed,
-    encode_notify_virtual_daa_score_changed, replay_into_ledger, validate_subscription_ack,
-    WrpcBlockDagInfo, WrpcDepositProjection, WrpcDepositSnapshot, WrpcFrame, WrpcJournal,
-    WrpcNotification, WrpcReplayReport, WrpcServerInfo,
+    encode_notify_virtual_daa_score_changed, replay_into_ledger, replay_into_ledger_addresses,
+    validate_subscription_ack, WrpcBlockDagInfo, WrpcDepositProjection, WrpcDepositSnapshot,
+    WrpcFrame, WrpcJournal, WrpcNotification, WrpcReplayReport, WrpcServerInfo,
 };

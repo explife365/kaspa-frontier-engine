@@ -75,10 +75,12 @@ owned-node transport is also available; start a synced TN10 node with `--utxoind
 ```powershell
 cargo run --bin tn10-wrpc-live -- kaspatest:qptv6u8kel95drh2p2z492cyksk8lpetep286fngqu5j9nk57g642lzf748kt --resnapshot-only
 cargo run --bin tn10-wrpc-live -- kaspatest:qptv6u8kel95drh2p2z492cyksk8lpetep286fngqu5j9nk57g642lzf748kt
+cargo run --bin tn10-wrpc-live -- kaspatest:<deposit-1> kaspatest:<deposit-2> --database .local/tn10-custody.sqlite
 ```
 
 Cleartext wRPC is restricted to loopback. Startup, reconnect, and periodic recovery perform
-a TN10 REST resnapshot; every notification is journaled before ledger application, and
+a bounded 1–100 address TN10 REST resnapshot; every notification is validated against the
+subscribed address set, journaled before ledger application, and
 applied journal rows are compacted while retaining a replay tail. Steady-state DAA frames
 use a maturity schedule instead of scanning every live UTXO; frames with no ledger delta are
 appended and checkpointed in one FULL-synchronous transaction. Production custody still
@@ -169,7 +171,7 @@ From kaspa.org’s integrator call, the Toccata guide, and kascov (not Discord �
 | KRC-20 commit/reveal vs `tn10api.kasplex.org` | Kasplex | `tn10-kasplex` + `examples/kasplex_krc20.py`. Frontier tick **TMBMN** is live (mint+transfer). Not USD. `--deploy` of a crate-owned tick burns **1000 tKAS**. |
 | DAGKnight / 100 BPS lore | Narrative only | KIP-2 Proposed. Live is GHOSTDAG @ 10 BPS. Fake telemetry does not activate it. Refused. |
 | Archival / indexer cost | Exchanges / ops | Need `getUtxosByAddresses` + DAA depth, not a simulated worker. `cex::snapshot_address` + `tn10-deposits` / `tn10-withdraw`. |
-| CEX integration rehearsal | Integrator call / `Kaspa to do.pdf` | Partial: bounded snapshots, durable exact withdrawals, leased idempotency-key webhook outbox, delta-driven durable wRPC replay, owned-node reconnect resnapshots, and a supervisor health gate. Production custody still requires redundant node operations and a receiver that atomically deduplicates delivery keys. |
+| CEX integration rehearsal | Integrator call / `Kaspa to do.pdf` | Partial: bounded multi-address snapshots/ingestion, durable exact withdrawals, leased idempotency-key webhook outbox, delta-driven durable wRPC replay, owned-node reconnect resnapshots, and a supervisor health gate. Production custody still requires redundant node operations and a receiver that atomically deduplicates delivery keys. |
 
 Do **not** open unofficial consensus PRs against rusty-kaspa. Acceptable PRs there follow their review process and KIPs.
 
