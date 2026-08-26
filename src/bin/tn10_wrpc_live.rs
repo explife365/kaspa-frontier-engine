@@ -6,8 +6,9 @@ use kaspa_frontier_engine::network::{
     is_valid_testnet_address, require_tn10, TESTNET_10_REST, TN10_WRPC_JSON,
 };
 use kaspa_frontier_engine::{
-    decode_notification, encode_notify_utxos_changed, encode_notify_virtual_daa_score_changed,
-    require_loopback_wrpc_url, validate_subscription_ack, DepositLedger, Tn10RestClient,
+    assess_owned_node, choose_failover_index, decode_notification, encode_notify_utxos_changed,
+    encode_notify_virtual_daa_score_changed, next_failover_index, probe_owned_node,
+    validate_owned_node_urls, validate_subscription_ack, DepositLedger, Tn10RestClient,
     WrpcDepositProjection, WrpcJournal, WrpcReplayReport,
 };
 use std::collections::HashSet;
@@ -21,28 +22,41 @@ use tokio_tungstenite::tungstenite::Message;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const MESSAGE_TIMEOUT: Duration = Duration::from_secs(30);
 const RESNAPSHOT_INTERVAL: Duration = Duration::from_secs(60);
+const DEFAULT_MAX_DAA_LAG: u64 = 100;
 
 struct Options {
     addresses: Vec<String>,
-    url: String,
+    urls: Vec<String>,
     rest: String,
     database: PathBuf,
     resnapshot_only: bool,
+    max_daa_lag: u64,
 }
 
 fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, String> {
     let mut addresses = Vec::new();
-    let mut url = format!("ws://127.0.0.1:{TN10_WRPC_JSON}");
+    let mut urls = Vec::new();
     let mut rest = TESTNET_10_REST.to_string();
     let mut database = PathBuf::from(".local/tn10-wrpc-live.sqlite");
     let mut resnapshot_only = false;
+    let mut max_daa_lag = DEFAULT_MAX_DAA_LAG;
     let mut args = arguments.into_iter();
     while let Some(argument) = args.next() {
         match argument.as_str() {
-            "--url" => url = args.next().ok_or("--url needs a value")?,
+            "--url" => urls.push(args.next().ok_or("--url needs a value")?),
             "--rest" => rest = args.next().ok_or("--rest needs a value")?,
             "--database" => database = PathBuf::from(args.next().ok_or("--database needs a path")?),
             "--resnapshot-only" => resnapshot_only = true,
+            "--max-daa-lag" => {
+                max_daa_lag = args
+                    .next()
+                    .ok_or("--max-daa-lag needs a value")?
+                    .parse()
+                    .map_err(|_| "--max-daa-lag must be an integer")?;
+                if !(1..=100_000).contains(&max_daa_lag) {
+                    return Err("--max-daa-lag must be 1-100000".into());
+                }
+            }
             _ if argument.starts_with('-') => return Err(format!("unknown flag {argument}")),
             _ => addresses.push(argument),
         }
@@ -62,18 +76,22 @@ fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, St
             return Err(format!("duplicate watched address {address}"));
         }
     }
-    require_loopback_wrpc_url(&url).map_err(|error| error.to_string())?;
+    if urls.is_empty() {
+        urls.push(format!("ws://127.0.0.1:{TN10_WRPC_JSON}"));
+    }
+    validate_owned_node_urls(&urls).map_err(|error| error.to_string())?;
     Ok(Options {
         addresses,
-        url,
+        urls,
         rest,
         database,
         resnapshot_only,
+        max_daa_lag,
     })
 }
 
 fn usage() -> &'static str {
-    "usage: tn10-wrpc-live ADDRESS [ADDRESS ...] [--url ws://127.0.0.1:18210] [--rest HTTPS] [--database PATH] [--resnapshot-only]"
+    "usage: tn10-wrpc-live ADDRESS [ADDRESS ...] [--url ws://127.0.0.1:18210]... [--rest HTTPS] [--database PATH] [--max-daa-lag 100] [--resnapshot-only]"
 }
 
 async fn resnapshot(
@@ -185,6 +203,7 @@ async fn receive_text(
 
 async fn run_connection(
     options: &Options,
+    url: &str,
     rest: &Tn10RestClient,
     journal: &mut WrpcJournal,
     ledger: &mut DepositLedger,
@@ -196,7 +215,7 @@ async fn run_connection(
     config.max_frame_size = Some(kaspa_frontier_engine::wrpc::MAX_WRPC_FRAME_BYTES);
     let (mut socket, _) = tokio::time::timeout(
         CONNECT_TIMEOUT,
-        tokio_tungstenite::connect_async_with_config(&options.url, Some(config), false),
+        tokio_tungstenite::connect_async_with_config(url, Some(config), false),
     )
     .await
     .map_err(|_| "wRPC connect timeout")??;
@@ -232,8 +251,9 @@ async fn run_connection(
         }
     }
     println!(
-        "subscribed  {} addresses + virtual DAA",
-        options.addresses.len()
+        "subscribed  {} addresses + virtual DAA via {}",
+        options.addresses.len(),
+        url
     );
 
     let mut resnapshot_interval = tokio::time::interval(RESNAPSHOT_INTERVAL);
@@ -289,6 +309,36 @@ fn source_for_addresses(addresses: &[String]) -> String {
     format!("owned-node:{}:{hash:016x}", canonical.len())
 }
 
+async fn next_owned_node(
+    urls: &[String],
+    rest: &Tn10RestClient,
+    failed_index: usize,
+    max_daa_lag: u64,
+) -> Result<(usize, bool), Box<dyn std::error::Error>> {
+    let public = rest.block_dag_info().await.ok();
+    let probes = futures_util::future::join_all(urls.iter().map(|url| probe_owned_node(url))).await;
+    let mut healthy = Vec::new();
+    if let Some(public) = public {
+        for (index, probe) in probes.into_iter().enumerate() {
+            if index == failed_index {
+                continue;
+            }
+            if let Ok(health) = probe {
+                if let Ok(assessment) =
+                    assess_owned_node(&health, public.virtual_daa_score, max_daa_lag)
+                {
+                    healthy.push((index, assessment));
+                }
+            }
+        }
+    }
+    let found_healthy = !healthy.is_empty();
+    Ok((
+        choose_failover_index(failed_index, urls.len(), &healthy)?,
+        found_healthy,
+    ))
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let options =
@@ -313,6 +363,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     println!("database    {}", options.database.display());
     println!("addresses   {}", options.addresses.len());
+    println!("owned nodes {}", options.urls.len());
     println!(
         "resnapshot  live={} checkpoint={}",
         replay.live_utxos, replay.checkpoint
@@ -326,9 +377,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mut delay = Duration::from_secs(1);
+    let mut node_index = 0usize;
     loop {
+        let url = options.urls[node_index].clone();
+        println!("connecting  {url}");
         match run_connection(
             &options,
+            &url,
             &rest,
             &mut journal,
             &mut ledger,
@@ -338,10 +393,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         {
             Ok(()) => unreachable!("wRPC connection loop only returns on failure"),
-            Err(error) => eprintln!("wRPC reconnect required: {error}"),
+            Err(error) => eprintln!("wRPC failover from {url}: {error}"),
         }
-        tokio::time::sleep(delay).await;
-        delay = (delay * 2).min(Duration::from_secs(30));
+        let (next_index, found_healthy) =
+            match next_owned_node(&options.urls, &rest, node_index, options.max_daa_lag).await {
+                Ok(choice) => choice,
+                Err(error) => {
+                    eprintln!("owned-node health probe retry required: {error}");
+                    (next_failover_index(node_index, options.urls.len())?, false)
+                }
+            };
+        if found_healthy {
+            delay = Duration::from_secs(1);
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        } else {
+            tokio::time::sleep(delay).await;
+            delay = (delay * 2).min(Duration::from_secs(30));
+        }
+        node_index = next_index;
         if let Err(error) =
             resnapshot(&rest, &options.addresses, &mut projection, &mut ledger).await
         {
@@ -381,11 +450,13 @@ mod tests {
 
     #[test]
     fn cli_restricts_cleartext_wrpc_to_loopback() {
-        assert!(require_loopback_wrpc_url("ws://127.0.0.1:18210").is_ok());
-        assert!(require_loopback_wrpc_url("ws://[::1]:18210").is_ok());
-        assert!(require_loopback_wrpc_url("ws://192.0.2.1:18210").is_err());
-        assert!(require_loopback_wrpc_url("wss://example.com").is_err());
-        assert!(require_loopback_wrpc_url("ws://user@127.0.0.1:18210").is_err());
+        assert!(kaspa_frontier_engine::require_loopback_wrpc_url("ws://127.0.0.1:18210").is_ok());
+        assert!(kaspa_frontier_engine::require_loopback_wrpc_url("ws://[::1]:18210").is_ok());
+        assert!(kaspa_frontier_engine::require_loopback_wrpc_url("ws://192.0.2.1:18210").is_err());
+        assert!(kaspa_frontier_engine::require_loopback_wrpc_url("wss://example.com").is_err());
+        assert!(
+            kaspa_frontier_engine::require_loopback_wrpc_url("ws://user@127.0.0.1:18210").is_err()
+        );
     }
 
     #[test]
@@ -398,15 +469,36 @@ mod tests {
         ])
         .unwrap();
         assert!(options.resnapshot_only);
-        assert_eq!(options.url, "ws://127.0.0.1:18210");
+        assert_eq!(options.urls, vec!["ws://127.0.0.1:18210"]);
+        assert_eq!(options.max_daa_lag, 100);
         assert_eq!(options.addresses, watched());
     }
 
     #[test]
     fn cli_accepts_bounded_unique_address_batches() {
-        let options = parse_args([ADDRESS.into(), ADDRESS_2.into()]).unwrap();
+        let options = parse_args([
+            ADDRESS.into(),
+            ADDRESS_2.into(),
+            "--url".into(),
+            "ws://127.0.0.1:18211".into(),
+            "--url".into(),
+            "ws://127.0.0.1:18210".into(),
+        ])
+        .unwrap();
         assert_eq!(options.addresses, vec![ADDRESS, ADDRESS_2]);
+        assert_eq!(
+            options.urls,
+            vec!["ws://127.0.0.1:18211", "ws://127.0.0.1:18210"]
+        );
         assert!(parse_args([ADDRESS.into(), ADDRESS.into()]).is_err());
+        assert!(parse_args([
+            ADDRESS.into(),
+            "--url".into(),
+            "ws://127.0.0.1:18210".into(),
+            "--url".into(),
+            "ws://127.0.0.1:18210".into(),
+        ])
+        .is_err());
         assert_eq!(
             source_for_addresses(&[ADDRESS.into(), ADDRESS_2.into()]),
             source_for_addresses(&[ADDRESS_2.into(), ADDRESS.into()])
@@ -415,6 +507,7 @@ mod tests {
             source_for_addresses(&[ADDRESS.into()]),
             source_for_addresses(&[ADDRESS.into(), ADDRESS_2.into()])
         );
+        assert!(parse_args([ADDRESS.into(), "--max-daa-lag".into(), "0".into()]).is_err());
     }
 
     #[test]

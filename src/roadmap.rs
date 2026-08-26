@@ -150,7 +150,7 @@ pub fn print_integrator_next() {
     );
     println!("  host02 tuce/mamajama/flywheel/engos: off unless a new UNSAT needs native DRAT");
     println!("  EVM work is Galleon L2 (wiKAS live); kaspad has no EVM — do not add one");
-    println!("  CEX rehearsal: bounded multi-address ingestion + durable exact withdrawals + scheduled/dead-letter webhook outbox + atomic deduplicating receiver + delta-driven durable wRPC + owned-node resnapshots + supervisor health gate. Production still needs redundant node ops and authenticated TLS deployment");
+    println!("  CEX rehearsal: bounded multi-address ingestion + durable exact withdrawals + scheduled/dead-letter webhook outbox + atomic deduplicating receiver + delta-driven durable wRPC + ordered owned-node failover/resnapshots + N-of-M supervisor health gate. Production still needs independently hosted nodes and authenticated TLS deployment");
 }
 
 /// Integrator asks this crate can ship, park on L2, or refuse.
@@ -223,7 +223,7 @@ pub const COMMUNITY_ASKS: &[CommunityAsk] = &[
     CommunityAsk {
         ask: "CEX plug-and-play REST wrapper",
         status: AskStatus::Partial,
-        note: "rehearsal only: bounded multi-address snapshots/ingestion, durable exact withdrawals, scheduled/dead-letter webhook outbox, atomic deduplicating receiver inbox, delta-driven durable wRPC replay, owned-node reconnect resnapshots, and a supervisor health gate. Production requires redundant node operations and authenticated TLS deployment",
+        note: "rehearsal only: bounded multi-address snapshots/ingestion, durable exact withdrawals, scheduled/dead-letter webhook outbox, atomic deduplicating receiver inbox, delta-driven durable wRPC replay, ordered owned-node failover/resnapshots, and an N-of-M supervisor health gate. Production requires independently hosted nodes and authenticated TLS deployment",
     },
     CommunityAsk {
         ask: "Kasplex tokenlist pagination",
@@ -233,7 +233,7 @@ pub const COMMUNITY_ASKS: &[CommunityAsk] = &[
     CommunityAsk {
         ask: "Local kaspad TN10 IBD",
         status: AskStatus::Shipped,
-        note: "owned kaspad 2.0.1 is synced with --utxoindex; tn10-node-health fails closed on network, version, sync, index, response consistency, or public-DAA lag",
+        note: "owned kaspad 2.0.1 is synced with --utxoindex; tn10-node-health fails closed on network, version, sync, index, response consistency, public-DAA lag, or N-of-M redundancy; tn10-wrpc-live fails over to the healthiest remaining loopback replica",
     },
     CommunityAsk {
         ask: "KIP-2 SAT fragments",

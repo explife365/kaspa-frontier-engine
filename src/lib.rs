@@ -64,8 +64,9 @@ pub use outbox_receiver::{
     DeliveryEnvelope, InboxOutcome, IncomingLedgerEvent, OutboxReceiverStore,
 };
 pub use owned_node::{
-    assess_owned_node, probe_owned_node, require_loopback_wrpc_url, OwnedNodeAssessment,
-    OwnedNodeHealth,
+    assess_owned_node, choose_failover_index, next_failover_index, probe_owned_node,
+    require_loopback_wrpc_url, select_primary, validate_owned_node_urls, OwnedNodeAssessment,
+    OwnedNodeHealth, MAX_OWNED_NODE_URLS,
 };
 pub use proof::{CovenantProof, CovenantProofStep};
 pub use rest::{

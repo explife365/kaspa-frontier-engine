@@ -7,6 +7,7 @@ use crate::wrpc::{
     encode_get_server_info, WrpcBlockDagInfo, WrpcServerInfo, MAX_WRPC_FRAME_BYTES,
 };
 use futures_util::{SinkExt, StreamExt};
+use std::collections::HashSet;
 use std::net::IpAddr;
 use std::time::Duration;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
@@ -16,6 +17,7 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(10);
 const MIN_SERVER_VERSION: (u64, u64, u64) = (2, 0, 1);
 const MAX_INTERNAL_DAA_DELTA: u64 = 100;
+pub const MAX_OWNED_NODE_URLS: usize = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OwnedNodeHealth {
@@ -69,6 +71,53 @@ pub fn require_loopback_wrpc_url(raw: &str) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+pub fn validate_owned_node_urls(urls: &[String]) -> Result<()> {
+    if urls.is_empty() || urls.len() > MAX_OWNED_NODE_URLS {
+        return Err(EngineError::Message(format!(
+            "owned-node pool requires 1-{MAX_OWNED_NODE_URLS} URLs"
+        )));
+    }
+    let mut unique = HashSet::with_capacity(urls.len());
+    for url in urls {
+        require_loopback_wrpc_url(url)?;
+        if !unique.insert(url) {
+            return Err(EngineError::Message(format!(
+                "duplicate owned-node URL {url}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Prefer the lowest public-DAA lag, then the earliest configured URL.
+pub fn select_primary(candidates: &[(usize, OwnedNodeAssessment)]) -> Option<usize> {
+    candidates
+        .iter()
+        .min_by_key(|(index, assessment)| (assessment.behind_public_daa, *index))
+        .map(|(index, _)| *index)
+}
+
+pub fn next_failover_index(failed_index: usize, count: usize) -> Result<usize> {
+    if count == 0 || failed_index >= count {
+        return Err(EngineError::Message(
+            "owned-node failover index is out of range".into(),
+        ));
+    }
+    Ok((failed_index + 1) % count)
+}
+
+/// Choose the healthiest remaining replica, otherwise rotate in configured order.
+pub fn choose_failover_index(
+    failed_index: usize,
+    count: usize,
+    healthy: &[(usize, OwnedNodeAssessment)],
+) -> Result<usize> {
+    if let Some(index) = select_primary(healthy) {
+        return Ok(index);
+    }
+    next_failover_index(failed_index, count)
 }
 
 pub async fn probe_owned_node(url: &str) -> Result<OwnedNodeHealth> {
@@ -297,5 +346,51 @@ mod tests {
         assert_eq!(parse_version("2.1.0-rc1").unwrap(), (2, 1, 0));
         assert!(parse_version("2.0").is_err());
         assert!(parse_version("2.0.1.4").is_err());
+    }
+
+    fn assessment(behind: u64) -> OwnedNodeAssessment {
+        OwnedNodeAssessment {
+            local_daa: 100 - behind,
+            public_daa: 100,
+            behind_public_daa: behind,
+            server_dag_delta: 0,
+        }
+    }
+
+    #[test]
+    fn owned_node_urls_must_be_bounded_unique_loopback() {
+        assert!(validate_owned_node_urls(&["ws://127.0.0.1:18210".into()]).is_ok());
+        assert!(validate_owned_node_urls(&[
+            "ws://127.0.0.1:18210".into(),
+            "ws://127.0.0.1:28210".into(),
+        ])
+        .is_ok());
+        assert!(validate_owned_node_urls(&[]).is_err());
+        assert!(validate_owned_node_urls(&[
+            "ws://127.0.0.1:18210".into(),
+            "ws://127.0.0.1:18210".into(),
+        ])
+        .is_err());
+        assert!(validate_owned_node_urls(&["ws://192.0.2.1:18210".into()]).is_err());
+        let too_many: Vec<String> = (0..=MAX_OWNED_NODE_URLS)
+            .map(|port| format!("ws://127.0.0.1:{}", 18210 + port))
+            .collect();
+        assert!(validate_owned_node_urls(&too_many).is_err());
+    }
+
+    #[test]
+    fn failover_prefers_healthy_replica_then_rotates() {
+        let lagging = vec![(0, assessment(10)), (1, assessment(1))];
+        assert_eq!(select_primary(&lagging), Some(1));
+        assert_eq!(select_primary(&[]), None);
+        assert_eq!(next_failover_index(0, 2).unwrap(), 1);
+        assert_eq!(next_failover_index(1, 2).unwrap(), 0);
+        assert!(next_failover_index(0, 0).is_err());
+        assert_eq!(
+            choose_failover_index(0, 2, &[(1, assessment(4))]).unwrap(),
+            1
+        );
+        assert_eq!(choose_failover_index(1, 2, &[]).unwrap(), 0);
+        assert_eq!(choose_failover_index(0, 1, &[]).unwrap(), 0);
     }
 }

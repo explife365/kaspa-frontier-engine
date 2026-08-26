@@ -77,6 +77,7 @@ owned-node transport is also available; start a synced TN10 node with `--utxoind
 cargo run --bin tn10-wrpc-live -- kaspatest:qptv6u8kel95drh2p2z492cyksk8lpetep286fngqu5j9nk57g642lzf748kt --resnapshot-only
 cargo run --bin tn10-wrpc-live -- kaspatest:qptv6u8kel95drh2p2z492cyksk8lpetep286fngqu5j9nk57g642lzf748kt
 cargo run --bin tn10-wrpc-live -- kaspatest:<deposit-1> kaspatest:<deposit-2> --database .local/tn10-custody.sqlite
+cargo run --release --bin tn10-wrpc-live -- kaspatest:<deposit-1> --url ws://127.0.0.1:18210 --url ws://127.0.0.1:28210
 ```
 
 Cleartext wRPC is restricted to loopback. Startup, reconnect, and periodic recovery perform
@@ -84,17 +85,25 @@ a bounded 1–100 address TN10 REST resnapshot; every notification is validated 
 subscribed address set, journaled before ledger application, and
 applied journal rows are compacted while retaining a replay tail. Steady-state DAA frames
 use a maturity schedule instead of scanning every live UTXO; frames with no ledger delta are
-appended and checkpointed in one FULL-synchronous transaction. Production custody still
-needs redundant supervised node operations.
+appended and checkpointed in one FULL-synchronous transaction. Repeated `--url` options form
+an ordered active-passive pool. After a connection or subscription failure, ingestion probes
+the remaining loopback nodes and prefers the lowest-lag healthy replica before rotating in
+configured order. Address-scoped journals stay unchanged across failovers.
 
 Use the owned-node health gate in service readiness checks. It exits nonzero unless the
-loopback node is TN10, v2.0.1+, synchronized, running `--utxoindex`, internally consistent,
-and no more than 100 DAA behind the public TN10 snapshot:
+required number of loopback nodes are TN10, v2.0.1+, synchronized, running `--utxoindex`,
+internally consistent, and no more than 100 DAA behind the public TN10 snapshot. The lowest-lag
+healthy node is selected, with configured order breaking ties. Live ingestion probes the same
+pool after a disconnect and prefers a healthy replica before rotating in order:
 
 ```powershell
 cargo run --release --bin tn10-node-health
 cargo run --release --bin tn10-node-health -- --json --max-daa-lag 100
+cargo run --release --bin tn10-node-health -- --url ws://127.0.0.1:18210 --url ws://127.0.0.1:28210 --min-healthy 2 --json
 ```
+
+For production, place those ports behind loopback-only tunnels or sidecars connected to
+operationally independent kaspad hosts; two ports on one host do not remove host-level failure.
 
 The deposit outbox never auto-acknowledges. Inspect it, explicitly acknowledge a manually
 handled event, or deliver leased events to an HTTPS webhook:
