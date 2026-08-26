@@ -150,7 +150,7 @@ pub fn print_integrator_next() {
     );
     println!("  host02 tuce/mamajama/flywheel/engos: off unless a new UNSAT needs native DRAT");
     println!("  EVM work is Galleon L2 (wiKAS live); kaspad has no EVM — do not add one");
-    println!("  CEX rehearsal: bounded multi-address ingestion + durable exact withdrawals + scheduled/dead-letter idempotency-key webhook outbox + delta-driven durable wRPC + owned-node resnapshots + supervisor health gate. Production still needs redundant node ops and a deduplicating receiver");
+    println!("  CEX rehearsal: bounded multi-address ingestion + durable exact withdrawals + scheduled/dead-letter webhook outbox + atomic deduplicating receiver + delta-driven durable wRPC + owned-node resnapshots + supervisor health gate. Production still needs redundant node ops and authenticated TLS deployment");
 }
 
 /// Integrator asks this crate can ship, park on L2, or refuse.
@@ -223,7 +223,7 @@ pub const COMMUNITY_ASKS: &[CommunityAsk] = &[
     CommunityAsk {
         ask: "CEX plug-and-play REST wrapper",
         status: AskStatus::Partial,
-        note: "rehearsal only: bounded multi-address snapshots/ingestion, durable exact withdrawals, scheduled/dead-letter idempotency-key webhook outbox, delta-driven durable wRPC replay, owned-node reconnect resnapshots, and a supervisor health gate. Production requires redundant node operations and a receiver that atomically deduplicates delivery keys",
+        note: "rehearsal only: bounded multi-address snapshots/ingestion, durable exact withdrawals, scheduled/dead-letter webhook outbox, atomic deduplicating receiver inbox, delta-driven durable wRPC replay, owned-node reconnect resnapshots, and a supervisor health gate. Production requires redundant node operations and authenticated TLS deployment",
     },
     CommunityAsk {
         ask: "Kasplex tokenlist pagination",

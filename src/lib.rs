@@ -23,6 +23,7 @@ pub mod kip2_sat;
 pub mod krc20;
 pub mod l2;
 pub mod network;
+pub mod outbox_receiver;
 pub mod owned_node;
 pub mod proof;
 pub mod rest;
@@ -59,6 +60,9 @@ pub use krc20::{
 };
 pub use l2::{EvmChainProbe, EvmRpcClient};
 pub use network::AddressNetwork;
+pub use outbox_receiver::{
+    DeliveryEnvelope, InboxOutcome, IncomingLedgerEvent, OutboxReceiverStore,
+};
 pub use owned_node::{
     assess_owned_node, probe_owned_node, require_loopback_wrpc_url, OwnedNodeAssessment,
     OwnedNodeHealth,

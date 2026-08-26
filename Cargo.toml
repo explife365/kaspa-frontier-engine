@@ -62,6 +62,10 @@ name = "tn10-outbox"
 path = "src/bin/tn10_outbox.rs"
 
 [[bin]]
+name = "tn10-outbox-receiver"
+path = "src/bin/tn10_outbox_receiver.rs"
+
+[[bin]]
 name = "tn10-node-health"
 path = "src/bin/tn10_node_health.rs"
 
