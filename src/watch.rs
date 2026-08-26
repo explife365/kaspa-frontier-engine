@@ -8,6 +8,7 @@ use crate::exchange::{
 };
 use crate::network::is_testnet_address;
 use crate::rest::{AddressUtxo, Tn10RestClient};
+use crate::withdrawal_ledger::{WithdrawalLedger, WithdrawalRecord};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Default)]
@@ -183,6 +184,51 @@ pub async fn poll_withdrawal(
         &withdrawal_utxos(&utxos?),
         required,
     ))
+}
+
+/// Restart-safe poll. Once the exact output is observed, its block DAA remains
+/// durable so a later spend cannot erase withdrawal confirmation evidence.
+pub async fn poll_durable_withdrawal(
+    client: &Tn10RestClient,
+    ledger: &mut WithdrawalLedger,
+    expected: &WithdrawalExpectation,
+) -> Result<WithdrawalRecord> {
+    if !is_testnet_address(&expected.dest) {
+        return Err(EngineError::NotTestnetAddress(expected.dest.clone()));
+    }
+    let (dag, utxos, transaction) = tokio::join!(
+        client.block_dag_info(),
+        client.utxos_for_address(&expected.dest),
+        client.toccata_tx(&expected.tx_id)
+    );
+    let dag = dag?;
+    let utxos = withdrawal_utxos(&utxos?);
+    let matches: Vec<_> = utxos
+        .iter()
+        .filter(|utxo| utxo.tx_id == expected.tx_id && utxo.output_index == expected.output_index)
+        .collect();
+    if matches.len() > 1 {
+        return Err(EngineError::Message(format!(
+            "REST returned duplicate withdrawal outpoint {}:{}",
+            expected.tx_id, expected.output_index
+        )));
+    }
+    if let Some(observed) = matches.first() {
+        ledger.observe(expected, dag.virtual_daa_score, observed)?;
+    }
+    let accepted = match transaction? {
+        Some(transaction) => {
+            if transaction.transaction_id != expected.tx_id {
+                return Err(EngineError::Message(format!(
+                    "REST transaction id {} does not match expected {}",
+                    transaction.transaction_id, expected.tx_id
+                )));
+            }
+            Some(transaction.is_accepted)
+        }
+        None => None,
+    };
+    ledger.advance(expected, dag.virtual_daa_score, accepted)
 }
 
 #[cfg(test)]

@@ -150,7 +150,7 @@ pub fn print_integrator_next() {
     );
     println!("  host02 tuce/mamajama/flywheel/engos: off unless a new UNSAT needs native DRAT");
     println!("  EVM work is Galleon L2 (wiKAS live); kaspad has no EVM — do not add one");
-    println!("  CEX rehearsal: bounded snapshots + exact withdrawals + leased idempotency-key webhook outbox + delta-driven durable wRPC + owned-node resnapshots + supervisor health gate. Production still needs redundant node ops and a deduplicating receiver");
+    println!("  CEX rehearsal: bounded snapshots + durable exact withdrawals + leased idempotency-key webhook outbox + delta-driven durable wRPC + owned-node resnapshots + supervisor health gate. Production still needs redundant node ops and a deduplicating receiver");
 }
 
 /// Integrator asks this crate can ship, park on L2, or refuse.
@@ -218,12 +218,12 @@ pub const COMMUNITY_ASKS: &[CommunityAsk] = &[
     CommunityAsk {
         ask: "Archival / indexer (getUtxosByAddresses + DAA)",
         status: AskStatus::Shipped,
-        note: "REST /addresses/{}/utxos + deposit/withdraw DAA depth. Not a simulated worker",
+        note: "REST /addresses/{}/utxos + deposit DAA depth + restart-safe SQLite withdrawal observations. Not a simulated worker",
     },
     CommunityAsk {
         ask: "CEX plug-and-play REST wrapper",
         status: AskStatus::Partial,
-        note: "rehearsal only: bounded snapshots, exact withdrawals, leased idempotency-key webhook outbox, delta-driven durable wRPC replay, owned-node reconnect resnapshots, and a supervisor health gate. Production requires redundant node operations and a receiver that atomically deduplicates delivery keys",
+        note: "rehearsal only: bounded snapshots, durable exact withdrawals, leased idempotency-key webhook outbox, delta-driven durable wRPC replay, owned-node reconnect resnapshots, and a supervisor health gate. Production requires redundant node operations and a receiver that atomically deduplicates delivery keys",
     },
     CommunityAsk {
         ask: "Kasplex tokenlist pagination",

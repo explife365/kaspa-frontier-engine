@@ -18,7 +18,7 @@ https://explorer.kaspa.org/addresses/kaspa:qpxdemlyx445kt5xteux0qhadaw8lh5m0vnqv
 | --- | --- |
 | `tn10-status` | Live TN10 DAG, REST hashrate, fee estimate, Kasplex indexer, Igra/Kasplex L2 probes |
 | `tn10-deposits` | Rehearsal watcher with transactional SQLite state/outbox; confirms on DAA |
-| `tn10-withdraw` | REST rehearsal: exact txid/dest/vout/amount must reach N DAA |
+| `tn10-withdraw` | Durable REST rehearsal: exact txid/dest/vout/amount must reach N DAA |
 | `tn10-proof` | Checks proof txids, Toccata v1 fields, and kascov covenant lineage on TN10 |
 | `exchange` | Deposit tracker **and** outbound DAA confirmation (submit â‰  done) |
 | `tn10-kasplex` | Live Kasplex tokenlist / address balances / open mints (inscriptions, not USD) |
@@ -38,7 +38,7 @@ cargo test
 cargo test -- --ignored
 cargo run --release --bin tn10-status
 cargo run --release --bin tn10-deposits -- kaspatest:<addr> --ledger .local/tn10-deposits.sqlite
-cargo run --release --bin tn10-withdraw -- kaspatest:<dest> <txid> <vout> <amount-sompi> 60
+cargo run --release --bin tn10-withdraw -- kaspatest:<dest> <txid> <vout> <amount-sompi> 60 --database .local/tn10-withdrawals.sqlite
 cargo run --release --bin tn10-proof
 cargo run --release --bin tn10-covenant-rpc
 python examples/silverscript/counter.py --print-address
@@ -110,6 +110,11 @@ a crash after remote success but before local acknowledgement intentionally retr
 key. SQLite leases prevent concurrent local workers from sending the same event; expired
 leases are reclaimable. Existing schema-v1 ledgers migrate transactionally to schema v2.
 
+Withdrawal expectations and the first exact destination-output observation are also stored
+under SQLite WAL with `synchronous=FULL`. A restart can therefore confirm an accepted
+withdrawal from its durable block DAA even after the recipient spends the output. Conflicting
+txid/vout/address/amount/block-DAA facts and accepted-to-rejected transitions fail closed.
+
 `counter.py --print-address` remains safe, but transaction funding/broadcast currently fails closed: the pinned Python SDK drops the Toccata v1 `computeBudget` field during serialization. Resume covenant broadcasts only after installing a build containing [rusty-kaspa PR #1074](https://github.com/kaspanet/rusty-kaspa/pull/1074) and updating the conformance test.
 
 Optional local node (rusty-kaspa **v2.0.1** Toccata, wRPC JSON on 18210). Binaries live in `%LOCALAPPDATA%\kaspa\v2.0.1` (on user PATH):
@@ -154,7 +159,7 @@ From kaspa.orgâ€™s integrator call, the Toccata guide, and kascov (not Discord â
 
 | Ask | Who | This crate |
 | --- | --- | --- |
-| Run a TN10 node and test deposits / withdrawals / indexing / tx parsing | Core, pools, exchanges | `tn10-deposits` + `tn10-withdraw` (REST DAA). The owned kaspad v2.0.1 is synced with `--utxoindex`; `tn10-node-health` provides a fail-closed readiness gate. We do not ship kaspad. |
+| Run a TN10 node and test deposits / withdrawals / indexing / tx parsing | Core, pools, exchanges | `tn10-deposits` + restart-safe `tn10-withdraw` (REST DAA). The owned kaspad v2.0.1 is synced with `--utxoindex`; `tn10-node-health` provides a fail-closed readiness gate. We do not ship kaspad. |
 | Parse v1 txs: `storageMass`, `compute_budget`, output `covenant_id` | rusty-kaspa Toccata guide | `tn10-proof` requires exact selected-output lineage and the complete previous outpoint of each covenant-authorizing input |
 | Fee estimation rehearsal | kaspa.org integrator call | `tn10-status` and `tn10_transfer.py` print `/info/fee-estimate` (minimum standard mempool/RPC policy, not consensus) |
 | Wallet / explorer covenant decode (UX lag) | Core R&D | Toccata is live (~517 mainnet covenants vs ~80k TN10). We print lineage; Covex / [kascov](https://kascov.io/) are the UIs. |
@@ -164,7 +169,7 @@ From kaspa.orgâ€™s integrator call, the Toccata guide, and kascov (not Discord â
 | KRC-20 commit/reveal vs `tn10api.kasplex.org` | Kasplex | `tn10-kasplex` + `examples/kasplex_krc20.py`. Frontier tick **TMBMN** is live (mint+transfer). Not USD. `--deploy` of a crate-owned tick burns **1000 tKAS**. |
 | DAGKnight / 100 BPS lore | Narrative only | KIP-2 Proposed. Live is GHOSTDAG @ 10 BPS. Fake telemetry does not activate it. Refused. |
 | Archival / indexer cost | Exchanges / ops | Need `getUtxosByAddresses` + DAA depth, not a simulated worker. `cex::snapshot_address` + `tn10-deposits` / `tn10-withdraw`. |
-| CEX integration rehearsal | Integrator call / `Kaspa to do.pdf` | Partial: bounded snapshots, exact withdrawals, leased idempotency-key webhook outbox, delta-driven durable wRPC replay, owned-node reconnect resnapshots, and a supervisor health gate. Production custody still requires redundant node operations and a receiver that atomically deduplicates delivery keys. |
+| CEX integration rehearsal | Integrator call / `Kaspa to do.pdf` | Partial: bounded snapshots, durable exact withdrawals, leased idempotency-key webhook outbox, delta-driven durable wRPC replay, owned-node reconnect resnapshots, and a supervisor health gate. Production custody still requires redundant node operations and a receiver that atomically deduplicates delivery keys. |
 
 Do **not** open unofficial consensus PRs against rusty-kaspa. Acceptable PRs there follow their review process and KIPs.
 

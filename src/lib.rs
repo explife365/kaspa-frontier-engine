@@ -30,6 +30,7 @@ pub mod roadmap;
 pub mod rpc;
 pub mod telemetry;
 pub mod watch;
+pub mod withdrawal_ledger;
 pub mod wrpc;
 
 pub use cex::{
@@ -70,7 +71,10 @@ pub use roadmap::{
     COMMUNITY_ASKS, L1_GAPS, PROTOCOL_LABEL, TRACKS,
 };
 pub use telemetry::GhostdagTelemetry;
-pub use watch::{poll_withdrawal, withdrawal_utxos, DepositWatch, WatchTick};
+pub use watch::{
+    poll_durable_withdrawal, poll_withdrawal, withdrawal_utxos, DepositWatch, WatchTick,
+};
+pub use withdrawal_ledger::{WithdrawalLedger, WithdrawalRecord, WithdrawalState};
 pub use wrpc::{
     decode_block_dag_info_response, decode_notification, decode_server_info_response,
     encode_get_block_dag_info, encode_get_server_info, encode_notify_utxos_changed,

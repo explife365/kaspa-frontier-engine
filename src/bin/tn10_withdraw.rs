@@ -1,10 +1,79 @@
 use kaspa_frontier_engine::network::{
-    self, is_testnet_address, tn10_tx_url, DEFAULT_DEPOSIT_CONFIRMATIONS, TARGET_BPS,
+    self, tn10_tx_url, DEFAULT_DEPOSIT_CONFIRMATIONS, TARGET_BPS,
 };
-use kaspa_frontier_engine::watch::poll_withdrawal;
-use kaspa_frontier_engine::{Tn10RestClient, WithdrawalExpectation};
+use kaspa_frontier_engine::{
+    poll_durable_withdrawal, EngineError, Tn10RestClient, WithdrawalExpectation, WithdrawalLedger,
+    WithdrawalState,
+};
 use std::env;
+use std::fs;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
+
+struct Options {
+    expected: WithdrawalExpectation,
+    required: u64,
+    database: PathBuf,
+}
+
+fn usage() -> &'static str {
+    "usage: tn10-withdraw <kaspatest:dest> <txid> <vout> <amount-sompi> [confirmations] [--database PATH]"
+}
+
+fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, String> {
+    let mut args = arguments.into_iter();
+    let dest = args.next().ok_or_else(|| usage().to_string())?;
+    let tx_id = args.next().ok_or_else(|| usage().to_string())?;
+    let output_index = args
+        .next()
+        .ok_or("tn10-withdraw requires the expected vout")?
+        .parse::<u32>()
+        .map_err(|_| "withdrawal vout must be a u32")?;
+    let amount_sompi = args
+        .next()
+        .ok_or("tn10-withdraw requires the expected amount in sompi")?
+        .parse::<u64>()
+        .map_err(|_| "withdrawal amount must be a u64")?;
+    let mut required = DEFAULT_DEPOSIT_CONFIRMATIONS;
+    let mut database = PathBuf::from(".local/tn10-withdrawals.sqlite");
+    let remaining: Vec<_> = args.collect();
+    let mut index = 0usize;
+    if remaining
+        .first()
+        .is_some_and(|value| !value.starts_with('-'))
+    {
+        required = remaining[0]
+            .parse::<u64>()
+            .map_err(|_| "confirmations must be a u64")?
+            .max(1);
+        index = 1;
+    }
+    while index < remaining.len() {
+        match remaining[index].as_str() {
+            "--database" => {
+                index += 1;
+                database = PathBuf::from(
+                    remaining
+                        .get(index)
+                        .ok_or("--database needs a path")?
+                        .as_str(),
+                );
+            }
+            flag => return Err(format!("unknown argument {flag}")),
+        }
+        index += 1;
+    }
+    Ok(Options {
+        expected: WithdrawalExpectation {
+            tx_id,
+            dest,
+            amount_sompi,
+            output_index,
+        },
+        required,
+        database,
+    })
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -12,75 +81,117 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_env_filter("tn10_withdraw=info,kaspa_frontier_engine=info")
         .init();
 
-    let dest = env::args().nth(1).ok_or(
-        "usage: tn10-withdraw <kaspatest:dest> <txid> <vout> <amount-sompi> [confirmations]",
-    )?;
-    let tx_id = env::args().nth(2).ok_or(
-        "usage: tn10-withdraw <kaspatest:dest> <txid> <vout> <amount-sompi> [confirmations]",
-    )?;
-    let output_index = env::args()
-        .nth(3)
-        .ok_or("tn10-withdraw requires the expected vout")?
-        .parse::<u32>()?;
-    let amount_sompi = env::args()
-        .nth(4)
-        .ok_or("tn10-withdraw requires the expected amount in sompi")?
-        .parse::<u64>()?;
-    let required = env::args()
-        .nth(5)
-        .map(|s| s.parse::<u64>())
-        .transpose()?
-        .unwrap_or(DEFAULT_DEPOSIT_CONFIRMATIONS)
-        .max(1);
-
-    if !is_testnet_address(&dest) {
-        return Err(format!("TN10 withdrawal watcher refuses non-testnet dest: {dest}").into());
+    let options =
+        parse_args(env::args().skip(1)).map_err(|error| format!("{error}\n{}", usage()))?;
+    if let Some(parent) = options.database.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)?;
+        }
     }
+    let mut ledger = WithdrawalLedger::open(&options.database)?;
+    let registered = ledger.register(&options.expected, options.required)?;
 
     network::print_dev_sig();
-    println!("Waiting for withdrawal {tx_id}");
-    println!("  dest {dest}");
-    println!("  exact vout {output_index} amount {amount_sompi} sompi");
+    println!("Waiting for withdrawal {}", options.expected.tx_id);
+    println!("  dest {}", options.expected.dest);
+    println!(
+        "  exact vout {} amount {} sompi",
+        options.expected.output_index, options.expected.amount_sompi
+    );
     println!(
         "  required {required} DAA (~{:.1}s at {TARGET_BPS} BPS)",
-        required as f64 / TARGET_BPS
+        options.required as f64 / TARGET_BPS,
+        required = options.required
     );
-    println!("  explorer {}", tn10_tx_url(&tx_id));
+    println!("  database {}", options.database.display());
+    println!("  resumed state {}", registered.state.as_str());
+    println!("  explorer {}", tn10_tx_url(&options.expected.tx_id));
 
-    let wait_secs = (((required as f64) / TARGET_BPS) * 4.0 + 60.0).clamp(90.0, 600.0) as u64;
+    let wait_secs =
+        (((options.required as f64) / TARGET_BPS) * 4.0 + 60.0).clamp(90.0, 600.0) as u64;
     let client = Tn10RestClient::new(network::TESTNET_10_REST)?;
-    let expected = WithdrawalExpectation {
-        tx_id: tx_id.clone(),
-        dest: dest.clone(),
-        amount_sompi,
-        output_index,
-    };
     let deadline = Instant::now() + Duration::from_secs(wait_secs);
     let mut delay = Duration::from_secs(1);
+    let mut last_state = registered.state;
     loop {
-        match poll_withdrawal(&client, &expected, required).await {
-            Ok(Some(hit)) => {
+        match poll_durable_withdrawal(&client, &mut ledger, &options.expected).await {
+            Ok(record) if record.state == WithdrawalState::Confirmed => {
+                let block_daa = record
+                    .observed_block_daa
+                    .ok_or("confirmed withdrawal is missing observed block DAA")?;
+                let confirmations = record.last_checked_daa.saturating_sub(block_daa);
                 println!(
                     "CONFIRMED vout {}  {} sompi  {} conf  blockDAA {}",
-                    hit.output_index, hit.amount_sompi, hit.confirmations, hit.block_daa_score
+                    record.expected.output_index,
+                    record.expected.amount_sompi,
+                    confirmations,
+                    block_daa
                 );
-                println!("  {}", tn10_tx_url(&hit.tx_id));
+                println!("  {}", tn10_tx_url(&record.expected.tx_id));
                 return Ok(());
             }
-            Ok(None) => {
+            Ok(record) if record.state == WithdrawalState::Rejected => {
+                return Err(record
+                    .rejection_reason
+                    .unwrap_or_else(|| "withdrawal was rejected".into())
+                    .into());
+            }
+            Ok(record) => {
+                if record.state != last_state {
+                    println!("  state {}", record.state.as_str());
+                    last_state = record.state;
+                }
                 if Instant::now() >= deadline {
-                    return Err(format!("withdrawal not confirmed within {wait_secs}s").into());
+                    return Err(format!(
+                        "withdrawal remained {} after {wait_secs}s; durable state retained",
+                        record.state.as_str()
+                    )
+                    .into());
                 }
                 delay = Duration::from_secs(2);
             }
-            Err(err) => {
+            Err(err @ (EngineError::Transport(_) | EngineError::Json(_))) => {
                 eprintln!("poll error: {err}");
                 delay = (delay * 2).min(Duration::from_secs(15));
                 if Instant::now() >= deadline {
                     return Err(err.into());
                 }
             }
+            Err(error) => return Err(error.into()),
         }
         tokio::time::sleep(delay).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ADDRESS: &str = "kaspatest:qptv6u8kel95drh2p2z492cyksk8lpetep286fngqu5j9nk57g642lzf748kt";
+
+    #[test]
+    fn parses_durable_database_and_confirmations() {
+        let options = parse_args([
+            ADDRESS.into(),
+            "a".repeat(64),
+            "1".into(),
+            "25000000".into(),
+            "120".into(),
+            "--database".into(),
+            "state.sqlite".into(),
+        ])
+        .unwrap();
+        assert_eq!(options.required, 120);
+        assert_eq!(options.database, PathBuf::from("state.sqlite"));
+        assert_eq!(options.expected.output_index, 1);
+        assert!(parse_args([ADDRESS.into(), "bad".into()]).is_err());
+        assert!(parse_args([
+            ADDRESS.into(),
+            "a".repeat(64),
+            "1".into(),
+            "1".into(),
+            "--unknown".into(),
+        ])
+        .is_err());
     }
 }
