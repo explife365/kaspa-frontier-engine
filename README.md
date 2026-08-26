@@ -79,9 +79,20 @@ cargo run --bin tn10-wrpc-live -- kaspatest:qptv6u8kel95drh2p2z492cyksk8lpetep28
 
 Cleartext wRPC is restricted to loopback. Startup, reconnect, and periodic recovery perform
 a TN10 REST resnapshot; every notification is journaled before ledger application, and
-applied journal rows are compacted while retaining a replay tail. Production custody still
+applied journal rows are compacted while retaining a replay tail. Steady-state DAA frames
+use a maturity schedule instead of scanning every live UTXO; frames with no ledger delta are
+appended and checkpointed in one FULL-synchronous transaction. Production custody still
 needs supervised node operations and a downstream consumer that enforces the supplied
 idempotency key.
+
+Use the owned-node health gate in service readiness checks. It exits nonzero unless the
+loopback node is TN10, v2.0.1+, synchronized, running `--utxoindex`, internally consistent,
+and no more than 100 DAA behind the public TN10 snapshot:
+
+```powershell
+cargo run --release --bin tn10-node-health
+cargo run --release --bin tn10-node-health -- --json --max-daa-lag 100
+```
 
 The deposit outbox never auto-acknowledges. Inspect it, explicitly acknowledge a manually
 handled event, or deliver leased events to an HTTPS webhook:
@@ -143,7 +154,7 @@ From kaspa.orgâ€™s integrator call, the Toccata guide, and kascov (not Discord â
 
 | Ask | Who | This crate |
 | --- | --- | --- |
-| Run a TN10 node and test deposits / withdrawals / indexing / tx parsing | Core, pools, exchanges | `tn10-deposits` + `tn10-withdraw` (REST DAA). kaspad v2.0.1 is installed locally; we still do not ship it. |
+| Run a TN10 node and test deposits / withdrawals / indexing / tx parsing | Core, pools, exchanges | `tn10-deposits` + `tn10-withdraw` (REST DAA). The owned kaspad v2.0.1 is synced with `--utxoindex`; `tn10-node-health` provides a fail-closed readiness gate. We do not ship kaspad. |
 | Parse v1 txs: `storageMass`, `compute_budget`, output `covenant_id` | rusty-kaspa Toccata guide | `tn10-proof` requires exact selected-output lineage and the complete previous outpoint of each covenant-authorizing input |
 | Fee estimation rehearsal | kaspa.org integrator call | `tn10-status` and `tn10_transfer.py` print `/info/fee-estimate` (minimum standard mempool/RPC policy, not consensus) |
 | Wallet / explorer covenant decode (UX lag) | Core R&D | Toccata is live (~517 mainnet covenants vs ~80k TN10). We print lineage; Covex / [kascov](https://kascov.io/) are the UIs. |
@@ -153,7 +164,7 @@ From kaspa.orgâ€™s integrator call, the Toccata guide, and kascov (not Discord â
 | KRC-20 commit/reveal vs `tn10api.kasplex.org` | Kasplex | `tn10-kasplex` + `examples/kasplex_krc20.py`. Frontier tick **TMBMN** is live (mint+transfer). Not USD. `--deploy` of a crate-owned tick burns **1000 tKAS**. |
 | DAGKnight / 100 BPS lore | Narrative only | KIP-2 Proposed. Live is GHOSTDAG @ 10 BPS. Fake telemetry does not activate it. Refused. |
 | Archival / indexer cost | Exchanges / ops | Need `getUtxosByAddresses` + DAA depth, not a simulated worker. `cex::snapshot_address` + `tn10-deposits` / `tn10-withdraw`. |
-| CEX integration rehearsal | Integrator call / `Kaspa to do.pdf` | Partial: bounded snapshots, exact withdrawals, leased idempotency-key webhook outbox, durable wRPC replay, and loopback owned-node ingestion with reconnect resnapshots. Production custody still requires supervised node operations and a receiver that atomically deduplicates delivery keys. |
+| CEX integration rehearsal | Integrator call / `Kaspa to do.pdf` | Partial: bounded snapshots, exact withdrawals, leased idempotency-key webhook outbox, delta-driven durable wRPC replay, owned-node reconnect resnapshots, and a supervisor health gate. Production custody still requires redundant node operations and a receiver that atomically deduplicates delivery keys. |
 
 Do **not** open unofficial consensus PRs against rusty-kaspa. Acceptable PRs there follow their review process and KIPs.
 

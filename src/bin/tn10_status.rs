@@ -1,6 +1,8 @@
 use kaspa_frontier_engine::l2::{probe_igra_galleon, probe_kasplex_l2};
 use kaspa_frontier_engine::roadmap;
-use kaspa_frontier_engine::{network, GhostdagTelemetry, KasplexClient, Tn10RestClient};
+use kaspa_frontier_engine::{
+    assess_owned_node, network, probe_owned_node, GhostdagTelemetry, KasplexClient, Tn10RestClient,
+};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -33,13 +35,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let rpc = kaspa_frontier_engine::l2::EvmRpcClient::new(network::IGRA_GALLEON_RPC)?;
         rpc.galleon_test_usdc_meta().await
     };
-    let (snap, krc, page, igra, kasplex_l2, usdc) = tokio::join!(
+    let owned_url = format!("ws://127.0.0.1:{}", network::TN10_WRPC_JSON);
+    let (snap, krc, page, igra, kasplex_l2, usdc, owned) = tokio::join!(
         client.status_snapshot(),
         kasplex.info(),
         kasplex.tokenlist(None),
         probe_igra_galleon(),
         probe_kasplex_l2(),
-        usdc_meta
+        usdc_meta,
+        probe_owned_node(&owned_url)
     );
     let snap = snap?;
     let dag = snap.dag;
@@ -52,6 +56,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("network            {}", telemetry.network);
     println!("protocol           {}", telemetry.protocol);
     println!("virtual DAA        {}", telemetry.virtual_daa_score);
+    match owned.and_then(|health| {
+        assess_owned_node(&health, telemetry.virtual_daa_score, 100)
+            .map(|assessment| (health, assessment))
+    }) {
+        Ok((health, assessment)) => println!(
+            "owned kaspad       {} synced, utxoindex, lag={} DAA  v{}",
+            health.server.network_id, assessment.behind_public_daa, health.server.server_version
+        ),
+        Err(error) => println!("owned kaspad       unavailable/unhealthy ({error})"),
+    }
     println!("blocks             {}", telemetry.block_count);
     println!("difficulty         {:.4}", telemetry.difficulty);
     println!(

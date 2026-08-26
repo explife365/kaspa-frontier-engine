@@ -7,8 +7,8 @@ use kaspa_frontier_engine::network::{
 };
 use kaspa_frontier_engine::{
     decode_notification, encode_notify_utxos_changed, encode_notify_virtual_daa_score_changed,
-    validate_subscription_ack, DepositLedger, Tn10RestClient, WrpcDepositProjection, WrpcJournal,
-    WrpcReplayReport,
+    require_loopback_wrpc_url, validate_subscription_ack, DepositLedger, Tn10RestClient,
+    WrpcDepositProjection, WrpcJournal, WrpcReplayReport,
 };
 use std::collections::HashSet;
 use std::env;
@@ -52,7 +52,7 @@ fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, St
     if !is_valid_testnet_address(&address) {
         return Err("ADDRESS must be a checksummed kaspatest address".into());
     }
-    require_loopback_ws(&url)?;
+    require_loopback_wrpc_url(&url).map_err(|error| error.to_string())?;
     Ok(Options {
         address,
         url,
@@ -64,29 +64,6 @@ fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, St
 
 fn usage() -> &'static str {
     "usage: tn10-wrpc-live ADDRESS [--url ws://127.0.0.1:18210] [--rest HTTPS] [--database PATH] [--resnapshot-only]"
-}
-
-fn require_loopback_ws(url: &str) -> Result<(), String> {
-    let authority = url
-        .strip_prefix("ws://")
-        .and_then(|remaining| remaining.split('/').next())
-        .ok_or("owned-node URL must use ws://")?;
-    if authority.contains('@') {
-        return Err("owned-node URL must not contain credentials".into());
-    }
-    let is_loopback = authority.starts_with("127.0.0.1:")
-        || authority.starts_with("localhost:")
-        || authority.starts_with("[::1]:");
-    if !is_loopback {
-        return Err("cleartext wRPC is restricted to a loopback owned node".into());
-    }
-    let port = authority
-        .rsplit_once(':')
-        .and_then(|(_, port)| port.parse::<u16>().ok())
-        .filter(|port| *port > 0)
-        .ok_or("owned-node URL requires a valid TCP port")?;
-    let _ = port;
-    Ok(())
 }
 
 async fn resnapshot(
@@ -120,27 +97,24 @@ async fn resnapshot(
 
 fn replay_pending_after_resnapshot(
     journal: &mut WrpcJournal,
-    ledger: &mut DepositLedger,
     projection: &mut WrpcDepositProjection,
     source: &str,
     address: &str,
 ) -> kaspa_frontier_engine::Result<WrpcReplayReport> {
     let checkpoint = journal.checkpoint(source)?;
     let frames = journal.frames(source)?;
+    let mut validated_through = None;
     for frame in &frames {
         if frame.sequence <= checkpoint {
             continue;
         }
         let notification = decode_notification(&frame.raw_json)?;
-        if let Some(snapshot) = projection.apply_after_resnapshot(notification, address)? {
-            ledger.reconcile(
-                snapshot.virtual_daa,
-                &snapshot.observed,
-                &snapshot.confirmed,
-                &snapshot.disappeared_outpoints,
-            )?;
-        }
-        journal.mark_applied(source, frame.sequence)?;
+        let delta = projection.apply_after_resnapshot(notification, address)?;
+        debug_assert!(delta.is_none());
+        validated_through = Some(frame.sequence);
+    }
+    if let Some(sequence) = validated_through {
+        journal.mark_applied_through(source, sequence)?;
     }
     Ok(WrpcReplayReport {
         checkpoint: journal.checkpoint(source)?,
@@ -157,19 +131,24 @@ fn apply_live_frame(
     source: &str,
     address: &str,
 ) -> kaspa_frontier_engine::Result<()> {
-    let sequence = journal.append(source, raw)?;
     let notification = decode_notification(raw)?;
     if let Some(snapshot) = projection.apply(notification, address)? {
+        let sequence = journal.append(source, raw)?;
         ledger.reconcile(
             snapshot.virtual_daa,
             &snapshot.observed,
             &snapshot.confirmed,
             &snapshot.disappeared_outpoints,
         )?;
-    }
-    journal.mark_applied(source, sequence)?;
-    if sequence % 1_000 == 0 {
-        let _ = journal.prune_applied(source, 100)?;
+        journal.mark_applied(source, sequence)?;
+        if sequence % 1_000 == 0 {
+            let _ = journal.prune_applied(source, 100)?;
+        }
+    } else {
+        let sequence = journal.append_applied(source, raw)?;
+        if sequence % 1_000 == 0 {
+            let _ = journal.prune_applied(source, 100)?;
+        }
     }
     Ok(())
 }
@@ -294,13 +273,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut projection = WrpcDepositProjection::default();
 
     resnapshot(&rest, &options.address, &mut projection, &mut ledger).await?;
-    let replay = replay_pending_after_resnapshot(
-        &mut journal,
-        &mut ledger,
-        &mut projection,
-        &source,
-        &options.address,
-    )?;
+    let replay =
+        replay_pending_after_resnapshot(&mut journal, &mut projection, &source, &options.address)?;
     println!("database    {}", options.database.display());
     println!(
         "resnapshot  live={} checkpoint={}",
@@ -338,7 +312,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         let replay = match replay_pending_after_resnapshot(
             &mut journal,
-            &mut ledger,
             &mut projection,
             &source,
             &options.address,
@@ -364,11 +337,11 @@ mod tests {
 
     #[test]
     fn cli_restricts_cleartext_wrpc_to_loopback() {
-        assert!(require_loopback_ws("ws://127.0.0.1:18210").is_ok());
-        assert!(require_loopback_ws("ws://[::1]:18210").is_ok());
-        assert!(require_loopback_ws("ws://192.0.2.1:18210").is_err());
-        assert!(require_loopback_ws("wss://example.com").is_err());
-        assert!(require_loopback_ws("ws://user@127.0.0.1:18210").is_err());
+        assert!(require_loopback_wrpc_url("ws://127.0.0.1:18210").is_ok());
+        assert!(require_loopback_wrpc_url("ws://[::1]:18210").is_ok());
+        assert!(require_loopback_wrpc_url("ws://192.0.2.1:18210").is_err());
+        assert!(require_loopback_wrpc_url("wss://example.com").is_err());
+        assert!(require_loopback_wrpc_url("ws://user@127.0.0.1:18210").is_err());
     }
 
     #[test]
@@ -395,10 +368,28 @@ mod tests {
                 .record("live", u64::try_from(index + 1).unwrap(), line)
                 .unwrap();
         }
-        let mut ledger = DepositLedger::open(&database).unwrap();
         let mut projection = WrpcDepositProjection::default();
         projection.bootstrap(160, &[], ADDRESS).unwrap();
-        let report = replay_pending_after_resnapshot(
+        let report =
+            replay_pending_after_resnapshot(&mut journal, &mut projection, "live", ADDRESS)
+                .unwrap();
+        assert_eq!(report.checkpoint, 4);
+        assert_eq!(report.live_utxos, 0);
+    }
+
+    #[test]
+    fn live_no_op_daa_frame_is_atomically_checkpointed() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("delta.sqlite");
+        let mut journal = WrpcJournal::open(&database).unwrap();
+        let mut ledger = DepositLedger::open(&database).unwrap();
+        let mut projection = WrpcDepositProjection::default();
+        let mut fixture = include_str!("../../fixtures/wrpc-utxos-replay.jsonl").lines();
+        let daa = fixture.next().unwrap();
+        let added = fixture.next().unwrap();
+
+        apply_live_frame(
+            daa,
             &mut journal,
             &mut ledger,
             &mut projection,
@@ -406,7 +397,75 @@ mod tests {
             ADDRESS,
         )
         .unwrap();
-        assert_eq!(report.checkpoint, 4);
-        assert_eq!(report.live_utxos, 0);
+        assert_eq!(journal.checkpoint("live").unwrap(), 1);
+        assert_eq!(ledger.pending_count().unwrap(), 0);
+
+        apply_live_frame(
+            added,
+            &mut journal,
+            &mut ledger,
+            &mut projection,
+            "live",
+            ADDRESS,
+        )
+        .unwrap();
+        assert_eq!(journal.checkpoint("live").unwrap(), 2);
+        assert_eq!(ledger.pending_count().unwrap(), 2);
+
+        let no_op = r#"{"method":"virtualDaaScoreChangedNotification","params":{"VirtualDaaScoreChanged":{"virtualDaaScore":"101"}}}"#;
+        apply_live_frame(
+            no_op,
+            &mut journal,
+            &mut ledger,
+            &mut projection,
+            "live",
+            ADDRESS,
+        )
+        .unwrap();
+        assert_eq!(journal.checkpoint("live").unwrap(), 3);
+        assert_eq!(ledger.pending_count().unwrap(), 2);
+        assert!(ledger.unacknowledged_events().unwrap().is_empty());
+    }
+
+    #[test]
+    #[ignore = "disk-backed throughput guard; run explicitly for performance validation"]
+    fn durable_no_op_frames_sustain_tn10_rate() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("throughput.sqlite");
+        let mut journal = WrpcJournal::open(&database).unwrap();
+        let mut ledger = DepositLedger::open(&database).unwrap();
+        let mut projection = WrpcDepositProjection::default();
+        let initial = r#"{"method":"virtualDaaScoreChangedNotification","params":{"VirtualDaaScoreChanged":{"virtualDaaScore":"100"}}}"#;
+        apply_live_frame(
+            initial,
+            &mut journal,
+            &mut ledger,
+            &mut projection,
+            "throughput",
+            ADDRESS,
+        )
+        .unwrap();
+
+        let started = std::time::Instant::now();
+        for virtual_daa_score in 101..=200 {
+            let raw = format!(
+                r#"{{"method":"virtualDaaScoreChangedNotification","params":{{"VirtualDaaScoreChanged":{{"virtualDaaScore":"{virtual_daa_score}"}}}}}}"#
+            );
+            apply_live_frame(
+                &raw,
+                &mut journal,
+                &mut ledger,
+                &mut projection,
+                "throughput",
+                ADDRESS,
+            )
+            .unwrap();
+        }
+        let elapsed = started.elapsed();
+        let frames_per_second = 100.0 / elapsed.as_secs_f64();
+        eprintln!("durable no-op ingestion: {frames_per_second:.1} frames/s");
+        assert!(frames_per_second >= 10.0);
+        assert_eq!(journal.checkpoint("throughput").unwrap(), 101);
+        assert_eq!(ledger.pending_count().unwrap(), 0);
     }
 }

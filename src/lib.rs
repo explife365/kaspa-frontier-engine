@@ -23,6 +23,7 @@ pub mod kip2_sat;
 pub mod krc20;
 pub mod l2;
 pub mod network;
+pub mod owned_node;
 pub mod proof;
 pub mod rest;
 pub mod roadmap;
@@ -55,6 +56,10 @@ pub use krc20::{
 };
 pub use l2::{EvmChainProbe, EvmRpcClient};
 pub use network::AddressNetwork;
+pub use owned_node::{
+    assess_owned_node, probe_owned_node, require_loopback_wrpc_url, OwnedNodeAssessment,
+    OwnedNodeHealth,
+};
 pub use proof::{CovenantProof, CovenantProofStep};
 pub use rest::{
     AddressBalance, AddressUtxo, BlockDagInfo, FeeEstimate, HashrateInfo, StatusSnapshot,
@@ -67,7 +72,9 @@ pub use roadmap::{
 pub use telemetry::GhostdagTelemetry;
 pub use watch::{poll_withdrawal, withdrawal_utxos, DepositWatch, WatchTick};
 pub use wrpc::{
-    decode_notification, encode_notify_utxos_changed, encode_notify_virtual_daa_score_changed,
-    replay_into_ledger, validate_subscription_ack, WrpcDepositProjection, WrpcDepositSnapshot,
-    WrpcFrame, WrpcJournal, WrpcNotification, WrpcReplayReport,
+    decode_block_dag_info_response, decode_notification, decode_server_info_response,
+    encode_get_block_dag_info, encode_get_server_info, encode_notify_utxos_changed,
+    encode_notify_virtual_daa_score_changed, replay_into_ledger, validate_subscription_ack,
+    WrpcBlockDagInfo, WrpcDepositProjection, WrpcDepositSnapshot, WrpcFrame, WrpcJournal,
+    WrpcNotification, WrpcReplayReport, WrpcServerInfo,
 };

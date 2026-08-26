@@ -61,5 +61,9 @@ path = "src/bin/tn10_wrpc_live.rs"
 name = "tn10-outbox"
 path = "src/bin/tn10_outbox.rs"
 
+[[bin]]
+name = "tn10-node-health"
+path = "src/bin/tn10_node_health.rs"
+
 [dev-dependencies]
 tempfile = "=3.13.0"

@@ -61,6 +61,53 @@ pub fn encode_notify_virtual_daa_score_changed(id: u64) -> Result<String> {
     })?)
 }
 
+pub fn encode_get_server_info(id: u64) -> Result<String> {
+    Ok(serde_json::to_string(&WrpcClientMessage {
+        id,
+        method: "getServerInfo",
+        params: serde_json::json!({}),
+    })?)
+}
+
+pub fn encode_get_block_dag_info(id: u64) -> Result<String> {
+    Ok(serde_json::to_string(&WrpcClientMessage {
+        id,
+        method: "getBlockDagInfo",
+        params: serde_json::json!({}),
+    })?)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WrpcServerInfo {
+    pub has_utxo_index: bool,
+    pub is_synced: bool,
+    pub network_id: String,
+    pub rpc_api_revision: u32,
+    pub rpc_api_version: u32,
+    pub server_version: String,
+    #[serde(deserialize_with = "crate::rest::de_u64_from_string_or_number")]
+    pub virtual_daa_score: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WrpcBlockDagInfo {
+    pub network: String,
+    #[serde(deserialize_with = "crate::rest::de_u64_from_string_or_number")]
+    pub virtual_daa_score: u64,
+}
+
+pub fn decode_server_info_response(raw: &str, expected_id: u64) -> Result<WrpcServerInfo> {
+    let params = response_params(raw, expected_id, "getServerInfo")?;
+    Ok(serde_json::from_value(params)?)
+}
+
+pub fn decode_block_dag_info_response(raw: &str, expected_id: u64) -> Result<WrpcBlockDagInfo> {
+    let params = response_params(raw, expected_id, "getBlockDagInfo")?;
+    Ok(serde_json::from_value(params)?)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WrpcNotification {
     UtxosChanged {
@@ -106,6 +153,40 @@ struct UtxosChangedParams {
 struct VirtualDaaScoreChangedParams {
     #[serde(deserialize_with = "crate::rest::de_u64_from_string_or_number")]
     virtual_daa_score: u64,
+}
+
+fn response_params(raw: &str, expected_id: u64, expected_method: &str) -> Result<Value> {
+    if raw.len() > MAX_WRPC_FRAME_BYTES {
+        return Err(EngineError::Message(
+            "wRPC response frame is oversized".into(),
+        ));
+    }
+    let message: WrpcServerMessage = serde_json::from_str(raw)?;
+    if let Some(error) = message.error {
+        let data = error
+            .data
+            .map(|value| format!(" data={value}"))
+            .unwrap_or_default();
+        return Err(EngineError::Message(format!(
+            "wRPC {expected_method} error [{}]: {}{data}",
+            error.code, error.message
+        )));
+    }
+    if message.id != Some(expected_id) {
+        return Err(EngineError::Message(format!(
+            "unexpected wRPC {expected_method} response id {:?}",
+            message.id
+        )));
+    }
+    if message.method.as_deref() != Some(expected_method) {
+        return Err(EngineError::Message(format!(
+            "unexpected wRPC response method {:?}; expected {expected_method}",
+            message.method
+        )));
+    }
+    message.params.ok_or_else(|| {
+        EngineError::Message(format!("wRPC {expected_method} response is missing params"))
+    })
 }
 
 pub fn decode_notification(raw: &str) -> Result<WrpcNotification> {
@@ -433,6 +514,50 @@ impl WrpcJournal {
             .map_err(|_| EngineError::Message("negative wRPC journal sequence".into()))
     }
 
+    /// Atomically append and checkpoint a frame that produced no ledger delta.
+    pub fn append_applied(&mut self, source: &str, raw_json: &str) -> Result<u64> {
+        validate_source(source)?;
+        decode_notification(raw_json)?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let checkpoint: i64 = transaction
+            .query_row(
+                "SELECT sequence FROM wrpc_checkpoint WHERE source=?1",
+                [source],
+                |row| row.get(0),
+            )
+            .optional()?
+            .unwrap_or(0);
+        let has_pending: bool = transaction.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM wrpc_frames WHERE source=?1 AND sequence>?2
+             )",
+            params![source, checkpoint],
+            |row| row.get(0),
+        )?;
+        if has_pending {
+            return Err(EngineError::Message(
+                "cannot append an applied frame while journal frames are pending".into(),
+            ));
+        }
+        let sequence = checkpoint
+            .checked_add(1)
+            .ok_or_else(|| EngineError::Message("wRPC journal sequence overflow".into()))?;
+        transaction.execute(
+            "INSERT INTO wrpc_frames(source, sequence, raw_json) VALUES(?1, ?2, ?3)",
+            params![source, sequence, raw_json],
+        )?;
+        transaction.execute(
+            "INSERT INTO wrpc_checkpoint(source, sequence) VALUES(?1, ?2)
+             ON CONFLICT(source) DO UPDATE SET sequence=excluded.sequence",
+            params![source, sequence],
+        )?;
+        transaction.commit()?;
+        u64::try_from(sequence)
+            .map_err(|_| EngineError::Message("negative wRPC journal sequence".into()))
+    }
+
     pub fn prune_applied(&mut self, source: &str, retain: u64) -> Result<usize> {
         validate_source(source)?;
         let checkpoint = self.checkpoint(source)?;
@@ -530,6 +655,51 @@ impl WrpcJournal {
         transaction.commit()?;
         Ok(())
     }
+
+    /// Advance across a validated contiguous range in one durable transaction.
+    pub fn mark_applied_through(&mut self, source: &str, sequence: u64) -> Result<()> {
+        validate_source(source)?;
+        if sequence == 0 {
+            return Err(EngineError::Message(
+                "wRPC checkpoint sequence must be positive".into(),
+            ));
+        }
+        let sequence = to_i64(sequence, "wRPC sequence")?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let checkpoint: i64 = transaction
+            .query_row(
+                "SELECT sequence FROM wrpc_checkpoint WHERE source=?1",
+                [source],
+                |row| row.get(0),
+            )
+            .optional()?
+            .unwrap_or(0);
+        if sequence <= checkpoint {
+            transaction.commit()?;
+            return Ok(());
+        }
+        let count: i64 = transaction.query_row(
+            "SELECT COUNT(*) FROM wrpc_frames
+             WHERE source=?1 AND sequence>?2 AND sequence<=?3",
+            params![source, checkpoint, sequence],
+            |row| row.get(0),
+        )?;
+        if count != sequence - checkpoint {
+            return Err(EngineError::Message(format!(
+                "cannot checkpoint non-contiguous wRPC range {}..={sequence}",
+                checkpoint + 1
+            )));
+        }
+        transaction.execute(
+            "INSERT INTO wrpc_checkpoint(source, sequence) VALUES(?1, ?2)
+             ON CONFLICT(source) DO UPDATE SET sequence=excluded.sequence",
+            params![source, sequence],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
 }
 
 fn require_columns(connection: &Connection, table: &str, required: &[&str]) -> Result<()> {
@@ -573,6 +743,9 @@ pub struct WrpcDepositSnapshot {
 pub struct WrpcDepositProjection {
     virtual_daa: Option<u64>,
     live: BTreeMap<(String, u32), RpcUtxoEntryRef>,
+    maturity_schedule: BTreeMap<u64, Vec<(String, u32)>>,
+    mature: HashSet<(String, u32)>,
+    unobserved: HashSet<(String, u32)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -669,7 +842,19 @@ impl WrpcDepositProjection {
         let disappeared = previous.difference(&current).cloned().collect();
         self.virtual_daa = Some(virtual_daa);
         self.live = replacement;
-        self.snapshot(disappeared)?
+        self.maturity_schedule.clear();
+        self.mature.clear();
+        self.unobserved.clear();
+        for (key, entry) in &self.live {
+            let maturity = maturity_daa(entry)?;
+            if maturity > virtual_daa {
+                self.maturity_schedule
+                    .entry(maturity)
+                    .or_default()
+                    .push(key.clone());
+            }
+        }
+        self.full_snapshot(disappeared)?
             .ok_or_else(|| EngineError::Message("REST resnapshot is missing virtual DAA".into()))
     }
 
@@ -696,7 +881,7 @@ impl WrpcDepositProjection {
                 require_watched(entry, watched_address)?;
             }
         }
-        self.snapshot(Vec::new())
+        Ok(None)
     }
 
     fn apply_strict(
@@ -707,6 +892,8 @@ impl WrpcDepositProjection {
         if !is_valid_testnet_address(watched_address) {
             return Err(EngineError::NotTestnetAddress(watched_address.into()));
         }
+        let mut observed = Vec::new();
+        let mut confirmed = Vec::new();
         let mut disappeared = Vec::new();
         match notification {
             WrpcNotification::VirtualDaaScoreChanged { virtual_daa_score } => {
@@ -719,6 +906,29 @@ impl WrpcDepositProjection {
                     ));
                 }
                 self.virtual_daa = Some(virtual_daa_score);
+                for key in std::mem::take(&mut self.unobserved) {
+                    if let Some(entry) = self.live.get(&key) {
+                        observed.push(to_appearance(entry, virtual_daa_score)?);
+                    }
+                }
+                while self
+                    .maturity_schedule
+                    .first_key_value()
+                    .is_some_and(|(maturity, _)| *maturity <= virtual_daa_score)
+                {
+                    let (_, keys) = self
+                        .maturity_schedule
+                        .pop_first()
+                        .expect("maturity key checked");
+                    for key in keys {
+                        let Some(entry) = self.live.get(&key) else {
+                            continue;
+                        };
+                        if self.mature.insert(key) {
+                            confirmed.push(to_confirmed(entry, virtual_daa_score)?);
+                        }
+                    }
+                }
             }
             WrpcNotification::UtxosChanged { added, removed } => {
                 for entry in removed {
@@ -735,7 +945,10 @@ impl WrpcDepositProjection {
                         )));
                     }
                     self.live.remove(&key);
-                    disappeared.push(key);
+                    self.mature.remove(&key);
+                    if !self.unobserved.remove(&key) {
+                        disappeared.push(key);
+                    }
                 }
                 for entry in added {
                     require_watched(&entry, watched_address)?;
@@ -748,38 +961,53 @@ impl WrpcDepositProjection {
                             )));
                         }
                     } else {
-                        self.live.insert(key, entry);
+                        let maturity = maturity_daa(&entry)?;
+                        self.maturity_schedule
+                            .entry(maturity)
+                            .or_default()
+                            .push(key.clone());
+                        self.live.insert(key.clone(), entry);
+                        if let Some(virtual_daa) = self.virtual_daa {
+                            let entry = self.live.get(&key).expect("entry was inserted");
+                            observed.push(to_appearance(entry, virtual_daa)?);
+                            if maturity <= virtual_daa && self.mature.insert(key) {
+                                confirmed.push(to_confirmed(entry, virtual_daa)?);
+                            }
+                        } else {
+                            self.unobserved.insert(key);
+                        }
                     }
                 }
             }
         }
-        self.snapshot(disappeared)
+        let Some(virtual_daa) = self.virtual_daa else {
+            return Ok(None);
+        };
+        if observed.is_empty() && confirmed.is_empty() && disappeared.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(WrpcDepositSnapshot {
+            virtual_daa,
+            observed,
+            confirmed,
+            disappeared_outpoints: disappeared,
+        }))
     }
 
-    fn snapshot(&self, disappeared: Vec<(String, u32)>) -> Result<Option<WrpcDepositSnapshot>> {
+    fn full_snapshot(
+        &mut self,
+        disappeared: Vec<(String, u32)>,
+    ) -> Result<Option<WrpcDepositSnapshot>> {
         let Some(virtual_daa) = self.virtual_daa else {
             return Ok(None);
         };
         let mut observed = Vec::with_capacity(self.live.len());
         let mut confirmed = Vec::new();
-        for entry in self.live.values() {
+        for (key, entry) in &self.live {
             let appearance = to_appearance(entry, virtual_daa)?;
-            let confirmations = virtual_daa.saturating_sub(appearance.block_daa_score);
-            let required = if appearance.is_coinbase {
-                DEFAULT_DEPOSIT_CONFIRMATIONS.max(COINBASE_MATURITY_DAA)
-            } else {
-                DEFAULT_DEPOSIT_CONFIRMATIONS.max(1)
-            };
-            if confirmations >= required {
-                confirmed.push(ConfirmedDeposit {
-                    tx_id: appearance.tx_id.clone(),
-                    output_index: appearance.output_index,
-                    address: appearance.address.clone(),
-                    amount_sompi: appearance.amount_sompi,
-                    block_daa_score: appearance.block_daa_score,
-                    confirmations,
-                    is_coinbase: appearance.is_coinbase,
-                });
+            if maturity_daa(entry)? <= virtual_daa {
+                self.mature.insert(key.clone());
+                confirmed.push(to_confirmed(entry, virtual_daa)?);
             }
             observed.push(appearance);
         }
@@ -831,6 +1059,32 @@ fn to_appearance(entry: &RpcUtxoEntryRef, virtual_daa: u64) -> Result<UtxoAppear
         block_daa_score: entry.utxo_entry.block_daa_score,
         virtual_daa,
         is_coinbase: entry.utxo_entry.is_coinbase,
+    })
+}
+
+fn maturity_daa(entry: &RpcUtxoEntryRef) -> Result<u64> {
+    let required = if entry.utxo_entry.is_coinbase {
+        DEFAULT_DEPOSIT_CONFIRMATIONS.max(COINBASE_MATURITY_DAA)
+    } else {
+        DEFAULT_DEPOSIT_CONFIRMATIONS.max(1)
+    };
+    entry
+        .utxo_entry
+        .block_daa_score
+        .checked_add(required)
+        .ok_or_else(|| EngineError::Message("wRPC deposit maturity DAA overflow".into()))
+}
+
+fn to_confirmed(entry: &RpcUtxoEntryRef, virtual_daa: u64) -> Result<ConfirmedDeposit> {
+    let appearance = to_appearance(entry, virtual_daa)?;
+    Ok(ConfirmedDeposit {
+        tx_id: appearance.tx_id,
+        output_index: appearance.output_index,
+        address: appearance.address,
+        amount_sompi: appearance.amount_sompi,
+        block_daa_score: appearance.block_daa_score,
+        confirmations: virtual_daa.saturating_sub(appearance.block_daa_score),
+        is_coinbase: appearance.is_coinbase,
     })
 }
 
@@ -912,6 +1166,43 @@ mod tests {
     }
 
     #[test]
+    fn decodes_owned_node_health_responses_strictly() {
+        assert_eq!(
+            encode_get_server_info(10).unwrap(),
+            r#"{"id":10,"method":"getServerInfo","params":{}}"#
+        );
+        assert_eq!(
+            encode_get_block_dag_info(11).unwrap(),
+            r#"{"id":11,"method":"getBlockDagInfo","params":{}}"#
+        );
+        let server = decode_server_info_response(
+            r#"{"id":10,"method":"getServerInfo","params":{"hasUtxoIndex":true,"isSynced":true,"networkId":"testnet-10","rpcApiRevision":0,"rpcApiVersion":1,"serverVersion":"2.0.1","virtualDaaScore":"554030001"}}"#,
+            10,
+        )
+        .unwrap();
+        assert!(server.is_synced);
+        assert!(server.has_utxo_index);
+        assert_eq!(server.virtual_daa_score, 554_030_001);
+        let dag = decode_block_dag_info_response(
+            r#"{"id":11,"method":"getBlockDagInfo","params":{"blockCount":1,"network":"testnet-10","virtualDaaScore":554030002}}"#,
+            11,
+        )
+        .unwrap();
+        assert_eq!(dag.network, "testnet-10");
+        assert_eq!(dag.virtual_daa_score, 554_030_002);
+        assert!(decode_server_info_response(
+            r#"{"id":9,"method":"getServerInfo","params":{}}"#,
+            10
+        )
+        .is_err());
+        assert!(decode_server_info_response(
+            r#"{"id":10,"method":"getServerInfo","error":{"code":-1,"message":"not synced"}}"#,
+            10
+        )
+        .is_err());
+    }
+
+    #[test]
     fn journal_is_gap_free_idempotent_and_checkpointed() {
         let mut journal = WrpcJournal::open(":memory:").unwrap();
         let frame = added_frame();
@@ -926,6 +1217,27 @@ mod tests {
         assert_eq!(journal.frames("fixture").unwrap().len(), 1);
         assert_eq!(journal.prune_applied("fixture", 0).unwrap(), 1);
         assert_eq!(journal.append("fixture", &frame).unwrap(), 2);
+    }
+
+    #[test]
+    fn no_op_frames_append_and_checkpoint_in_one_operation() {
+        let mut journal = WrpcJournal::open(":memory:").unwrap();
+        let daa = r#"{"method":"virtualDaaScoreChangedNotification","params":{"VirtualDaaScoreChanged":{"virtualDaaScore":"100"}}}"#;
+        assert_eq!(journal.append_applied("live", daa).unwrap(), 1);
+        assert_eq!(journal.checkpoint("live").unwrap(), 1);
+
+        assert_eq!(journal.append("live", &added_frame()).unwrap(), 2);
+        assert!(journal.append_applied("live", daa).is_err());
+        journal.mark_applied("live", 2).unwrap();
+        assert_eq!(journal.append_applied("live", daa).unwrap(), 3);
+        assert_eq!(journal.checkpoint("live").unwrap(), 3);
+
+        let mut replay = WrpcJournal::open(":memory:").unwrap();
+        for sequence in 1..=3 {
+            replay.record("replay", sequence, daa).unwrap();
+        }
+        replay.mark_applied_through("replay", 3).unwrap();
+        assert_eq!(replay.checkpoint("replay").unwrap(), 3);
     }
 
     #[test]
@@ -969,6 +1281,134 @@ mod tests {
         let snapshot = projection.apply(unknown, ADDRESS).unwrap().unwrap();
         assert_eq!(snapshot.disappeared_outpoints.len(), 1);
         assert_eq!(projection.live_count(), 1);
+    }
+
+    #[test]
+    fn daa_ticks_emit_only_new_maturities_for_large_live_sets() {
+        let mut projection = WrpcDepositProjection::default();
+        let initial_daa = WrpcNotification::VirtualDaaScoreChanged {
+            virtual_daa_score: 100,
+        };
+        assert!(projection.apply(initial_daa, ADDRESS).unwrap().is_none());
+
+        let entries = (0..2_000)
+            .map(|index| RpcUtxoEntryRef {
+                address: Some(ADDRESS.into()),
+                outpoint: RpcOutpoint {
+                    transaction_id: format!("{index:064x}"),
+                    index: 0,
+                },
+                utxo_entry: RpcUtxoEntry {
+                    amount: 1_000,
+                    script_public_key: RpcScriptPublicKey {
+                        script_public_key: Some("20ab".into()),
+                        version: 0,
+                    },
+                    block_daa_score: 100,
+                    is_coinbase: false,
+                    covenant_id: None,
+                    storage_mass: None,
+                },
+            })
+            .collect();
+        let added = WrpcNotification::UtxosChanged {
+            added: entries,
+            removed: Vec::new(),
+        };
+        let snapshot = projection.apply(added, ADDRESS).unwrap().unwrap();
+        assert_eq!(snapshot.observed.len(), 2_000);
+        assert!(snapshot.confirmed.is_empty());
+
+        for virtual_daa_score in 101..160 {
+            assert!(projection
+                .apply(
+                    WrpcNotification::VirtualDaaScoreChanged { virtual_daa_score },
+                    ADDRESS,
+                )
+                .unwrap()
+                .is_none());
+        }
+        let matured = projection
+            .apply(
+                WrpcNotification::VirtualDaaScoreChanged {
+                    virtual_daa_score: 160,
+                },
+                ADDRESS,
+            )
+            .unwrap()
+            .unwrap();
+        assert!(matured.observed.is_empty());
+        assert_eq!(matured.confirmed.len(), 2_000);
+        assert!(projection
+            .apply(
+                WrpcNotification::VirtualDaaScoreChanged {
+                    virtual_daa_score: 161,
+                },
+                ADDRESS,
+            )
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    #[ignore = "local throughput guard; run explicitly for performance validation"]
+    fn no_op_daa_projection_sustains_well_above_tn10_rate() {
+        let mut projection = WrpcDepositProjection::default();
+        projection
+            .apply(
+                WrpcNotification::VirtualDaaScoreChanged {
+                    virtual_daa_score: 200,
+                },
+                ADDRESS,
+            )
+            .unwrap();
+        let entries = (0..10_000)
+            .map(|index| RpcUtxoEntryRef {
+                address: Some(ADDRESS.into()),
+                outpoint: RpcOutpoint {
+                    transaction_id: format!("{index:064x}"),
+                    index: 0,
+                },
+                utxo_entry: RpcUtxoEntry {
+                    amount: 1_000,
+                    script_public_key: RpcScriptPublicKey {
+                        script_public_key: Some("20ab".into()),
+                        version: 0,
+                    },
+                    block_daa_score: 100,
+                    is_coinbase: false,
+                    covenant_id: None,
+                    storage_mass: None,
+                },
+            })
+            .collect();
+        projection
+            .apply(
+                WrpcNotification::UtxosChanged {
+                    added: entries,
+                    removed: Vec::new(),
+                },
+                ADDRESS,
+            )
+            .unwrap();
+
+        let started = std::time::Instant::now();
+        for virtual_daa_score in 201..=1_200 {
+            assert!(projection
+                .apply(
+                    WrpcNotification::VirtualDaaScoreChanged { virtual_daa_score },
+                    ADDRESS,
+                )
+                .unwrap()
+                .is_none());
+        }
+        let elapsed = started.elapsed();
+        let frames_per_second = 1_000.0 / elapsed.as_secs_f64();
+        eprintln!(
+            "delta projection: {frames_per_second:.0} DAA frames/s with {} live UTXOs",
+            projection.live_count()
+        );
+        assert!(frames_per_second >= 100.0);
     }
 
     #[test]
