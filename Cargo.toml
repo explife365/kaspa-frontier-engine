@@ -1,0 +1,65 @@
+[package]
+name = "kaspa-frontier-engine"
+version = "0.3.0"
+edition = "2021"
+rust-version = "1.80"
+description = "Honest TN10 client: deposits, Toccata proofs, Kasplex/L2 probes, GHOSTDAG telemetry."
+license = "MIT"
+publish = false
+
+[dependencies]
+axum = "0.8.9"
+futures-util = "0.3.34"
+reqwest = { version = "=0.12.9", default-features = false, features = ["json", "rustls-tls", "gzip", "http2"] }
+rusqlite = { version = "=0.32.1", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "net", "io-util"] }
+tokio-tungstenite = "=0.29.0"
+tower = { version = "0.5.3", features = ["limit", "timeout", "util"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[[bin]]
+name = "tn10-status"
+path = "src/bin/tn10_status.rs"
+
+[[bin]]
+name = "tn10-deposits"
+path = "src/bin/tn10_deposits.rs"
+
+[[bin]]
+name = "tn10-proof"
+path = "src/bin/tn10_proof.rs"
+
+[[bin]]
+name = "tn10-kasplex"
+path = "src/bin/tn10_kasplex.rs"
+
+[[bin]]
+name = "tn10-withdraw"
+path = "src/bin/tn10_withdraw.rs"
+
+[[bin]]
+name = "krc20-demo"
+path = "src/bin/krc20_demo.rs"
+
+[[bin]]
+name = "tn10-covenant-rpc"
+path = "src/bin/tn10_covenant_rpc.rs"
+
+[[bin]]
+name = "tn10-wrpc-replay"
+path = "src/bin/tn10_wrpc_replay.rs"
+
+[[bin]]
+name = "tn10-wrpc-live"
+path = "src/bin/tn10_wrpc_live.rs"
+
+[[bin]]
+name = "tn10-outbox"
+path = "src/bin/tn10_outbox.rs"
+
+[dev-dependencies]
+tempfile = "=3.13.0"

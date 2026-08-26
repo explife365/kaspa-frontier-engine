@@ -1,0 +1,41 @@
+KIP / integrator thread (not a mainnet activation post)
+
+Subject: TN10 integrator notes — Toccata UX lag, kascov RPC shim, SAT v2 is not KIP-2
+
+Live L1 is still GHOSTDAG @ 10 BPS + Toccata. KIP-2 / DAGKnight is Proposed. Do not treat anything below as an activation.
+
+1. Toccata lineage is on-chain. Wallet/explorer lag is not a consensus bug.
+   kaspad already accepts v1 txs (mass, compute_budget, output covenant_id).
+   Mainnet ~517 covenants vs ~80k on TN10 — that gap is product: Kaspa NG / Kaspium /
+   explorer decode of covenant_id, kascov/Covex UIs, indexer coverage.
+   This crate prints explorer links + kascov lineage. We cannot ship wallet decode
+   from a freelance TN10 repo.
+
+2. getUtxosByCovenantId is still missing on kaspad.
+   Community indexer: https://kascov.io/data/testnet-10/c/<id>.json
+   Local JSON-RPC shim (REST + kascov, labelled not-kaspad):
+     cargo run --release --bin tn10-covenant-rpc
+     POST http://127.0.0.1:18710
+     methods: getInfo, getBlockDagInfo, getUtxosByAddresses,
+              getUtxosByCovenantId, getCovenant
+   That is an integrator workaround. It does not add the method to kaspad.
+
+3. SAT v2 (toy encoding, send to this thread only)
+   Topo-id-as-time made f=2d vacuously UNSAT. Publish times + f-sweep are the check.
+   f=2d has a cex except n=6 d=2. Finite "safe" f ~ n-2 tracks graph size, not delay
+   — not a KIP-2 invariant. Task A* blues: n=6 [0,3,4], n=8 [0,1,2,5].
+   Round 3: Glucose4, Cadical195, and Minisat22 agree on the same CNFs; SAT models
+   were independently clause-checked. host02 native kissat+drat-trim verified the
+   boundary UNSAT CNFs. That is a CNF proof, not a protocol proof.
+   A KIP-2 verdict is kaspanet/kips Status leaving Proposed, DK in rusty-kaspa,
+   a public testnet, then a mainnet HF. This crate cannot mint that.
+
+4. Circle USDC is not on Igra Galleon.
+   Circle’s published USDC list has no chain 38836.
+   Galleon has an Igra *test* USDC at 0xFd89676CBb3D2742c565aFC02986370ef4ba667A
+   (USD Coin / 6 decimals). Not Circle-issued, not redeemable. Do not deploy a USDC
+   lookalike. L1 has no EVM; stables live on L2 when Circle actually lists.
+
+5. Local kaspad TN10 IBD
+   kaspad 2.0.1 can be running headers-proof IBD and still not at tip. Hours of disk.
+   Integrators can use public REST until IBD finishes. Do not fake 100 BPS telemetry.

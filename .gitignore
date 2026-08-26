@@ -1,0 +1,16 @@
+/target
+**/*.rs.bk
+.env
+.env.local
+kaspa.env
+.idea
+.vscode
+.local/
+examples/galleon/out/
+examples/galleon/cache/
+examples/galleon/broadcast/
+*.key
+__pycache__/
+*.pyc
+scripts/tn12_tps_out/
+scripts/bps100_out/

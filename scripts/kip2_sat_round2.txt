@@ -1,0 +1,13 @@
+KIP-2 SAT round 2 (host02). Does not ratify KIP-2. No kaspad patch. No fake 100 BPS.
+
+Round 1 gap: Task A CNF was k-cluster only. SAT blues=[0]; greedy topo paints all blue.
+
+Round 2 Task A:
+- Keep k-cluster clauses.
+- Add greedy maximality: a vertex that could be blue under the paper's greedy rule must be blue.
+- Re-run n=6 k=2, n=8 k=2, n=8 k=3.
+- Report SAT/UNSAT + witness. If SAT, check greedy topo vs SAT blues.
+
+Round 2 Task B (optional): do not treat SAT at n<=12 as a KIP verdict. If you enlarge n, say so.
+
+Commands stay in AI Agent/scripts/dagknight_sat/.

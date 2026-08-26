@@ -1,0 +1,5 @@
+# Reproducible SDK baseline. Covenant broadcasting fails closed because this
+# build still drops computeBudget; upgrade only to a build containing
+# rusty-kaspa PR #1074 and update the conformance test.
+kaspa==2.0.2rc1
+eth-account==0.14.0

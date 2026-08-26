@@ -1,0 +1,34 @@
+KIP-2 SAT round 3. Does not ratify KIP-2. No kaspad patch. No fake 100 BPS.
+Send to the KIP thread, not mainnet.
+
+v2 SAT is logged, not ratified.
+- Topo-id windows made f=2d vacuously UNSAT; publish times + an f-sweep are the right toy check.
+- Under that encoding, f=2d has a cex for every instance except n=6 d=2.
+- The finite "safe" f is about n-2, so it tracks graph size more than delay — not a KIP-2 invariant.
+- Task A* blues: n=6 [0,3,4], n=8 [0,1,2,5].
+- tn10-status prints this.
+
+Independent re-solve (this machine, not host02 kissat):
+  Solvers: PySAT Glucose4, Cadical195, Minisat22 (all agree).
+  Kissat404 via PySAT access-violates on this Windows Python; not used.
+  SAT models were independently checked against every DIMACS clause.
+  JSON witnesses were independently checked as delay-hypothesis counterexamples.
+  PySAT DRAT traces are not plain RUP; dumped where small enough. UNSAT
+  rests on three-solver agreement, not a machine-checked DRAT certificate.
+
+f-sweep boundary (confirmed by all three solvers):
+  n=6 d=1: max SAT f=3 / min UNSAT f=4  (cex at stated f=2)
+  n=6 d=2: max SAT f=3 / min UNSAT f=4  (no cex at stated f=4)
+  n=8 d=1: max SAT f=5 / min UNSAT f=6
+  n=8 d=2: max SAT f=5 / min UNSAT f=6
+  n=10 d=1 and d=2: max SAT f=7 / min UNSAT f=8
+
+Task A* (k-cluster, SAT, models clause-checked):
+  n=6 k=2, n=8 k=2, n=8 k=3
+
+Verifier: AI Agent/scripts/dagknight_sat/verify_round3.py
+Report:   AI Agent/scripts/dagknight_sat/out_v2/VERIFIED.md
+This copy: scripts/kip2_sat_verified.md
+
+Still not a protocol proof. Do not treat n-2 as a KIP-2 k.
+No kaspad patch. No 100 BPS telemetry.
