@@ -38,7 +38,9 @@ pub use cex::{
     CexSpendable, OutpointSpendGuard,
 };
 pub use covenant::{CovenantError, CovenantPolicyEngine, NativeCovenantUtxo};
-pub use deposit_ledger::{DepositLedger, LedgerEvent};
+pub use deposit_ledger::{
+    ClaimedLedgerEvent, DeliveryFailureOutcome, DepositLedger, LedgerEvent, OutboxEventStatus,
+};
 pub use erc20::Erc20Meta;
 pub use error::{EngineError, Result};
 pub use exchange::{

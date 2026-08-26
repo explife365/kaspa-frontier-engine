@@ -101,8 +101,10 @@ handled event, or deliver leased events to an HTTPS webhook:
 
 ```powershell
 cargo run --bin tn10-outbox -- list
+cargo run --bin tn10-outbox -- dead
+cargo run --bin tn10-outbox -- requeue 1
 cargo run --bin tn10-outbox -- ack 1
-cargo run --bin tn10-outbox -- deliver https://custody.example/kaspa-events --limit 100
+cargo run --bin tn10-outbox -- deliver https://custody.example/kaspa-events --limit 100 --max-attempts 5 --retry-base-seconds 5 --retry-max-seconds 300
 ```
 
 For the REST polling database, add `--database .local/tn10-deposits.sqlite`. Webhook requests
@@ -110,7 +112,10 @@ include `Idempotency-Key: credit:<txid>:<vout>` (or `reverse:...`) and a version
 The receiver must atomically store that key before returning 2xx. Delivery is at least once:
 a crash after remote success but before local acknowledgement intentionally retries the same
 key. SQLite leases prevent concurrent local workers from sending the same event; expired
-leases are reclaimable. Existing schema-v1 ledgers migrate transactionally to schema v2.
+leases are reclaimable. Failed events receive bounded exponential retry scheduling so later
+events are not blocked. Events reaching the attempt limit move to a durable dead-letter state
+until an operator acknowledges or explicitly requeues them. Existing schema-v1/v2 ledgers
+migrate transactionally to schema v3.
 
 Withdrawal expectations and the first exact destination-output observation are also stored
 under SQLite WAL with `synchronous=FULL`. A restart can therefore confirm an accepted
@@ -171,7 +176,7 @@ From kaspa.orgâ€™s integrator call, the Toccata guide, and kascov (not Discord â
 | KRC-20 commit/reveal vs `tn10api.kasplex.org` | Kasplex | `tn10-kasplex` + `examples/kasplex_krc20.py`. Frontier tick **TMBMN** is live (mint+transfer). Not USD. `--deploy` of a crate-owned tick burns **1000 tKAS**. |
 | DAGKnight / 100 BPS lore | Narrative only | KIP-2 Proposed. Live is GHOSTDAG @ 10 BPS. Fake telemetry does not activate it. Refused. |
 | Archival / indexer cost | Exchanges / ops | Need `getUtxosByAddresses` + DAA depth, not a simulated worker. `cex::snapshot_address` + `tn10-deposits` / `tn10-withdraw`. |
-| CEX integration rehearsal | Integrator call / `Kaspa to do.pdf` | Partial: bounded multi-address snapshots/ingestion, durable exact withdrawals, leased idempotency-key webhook outbox, delta-driven durable wRPC replay, owned-node reconnect resnapshots, and a supervisor health gate. Production custody still requires redundant node operations and a receiver that atomically deduplicates delivery keys. |
+| CEX integration rehearsal | Integrator call / `Kaspa to do.pdf` | Partial: bounded multi-address snapshots/ingestion, durable exact withdrawals, scheduled/dead-letter idempotency-key webhook outbox, delta-driven durable wRPC replay, owned-node reconnect resnapshots, and a supervisor health gate. Production custody still requires redundant node operations and a receiver that atomically deduplicates delivery keys. |
 
 Do **not** open unofficial consensus PRs against rusty-kaspa. Acceptable PRs there follow their review process and KIPs.
 

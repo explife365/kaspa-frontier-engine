@@ -11,7 +11,7 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::time::Duration;
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,6 +23,30 @@ pub struct LedgerEvent {
     pub output_index: u32,
     pub amount_sompi: u64,
     pub address: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutboxEventStatus {
+    #[serde(flatten)]
+    pub event: LedgerEvent,
+    pub attempts: u32,
+    pub next_attempt_at: u64,
+    pub dead_lettered: bool,
+    pub dead_lettered_at: Option<u64>,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClaimedLedgerEvent {
+    pub event: LedgerEvent,
+    pub attempts: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeliveryFailureOutcome {
+    RetryScheduled { attempts: u32, next_attempt_at: u64 },
+    DeadLettered { attempts: u32 },
 }
 
 pub struct DepositLedger {
@@ -43,7 +67,11 @@ impl DepositLedger {
                 |row| row.get(0),
             )?;
             match version {
-                1 => migrate_v1_to_v2(&conn)?,
+                1 => {
+                    migrate_v1_to_v2(&conn)?;
+                    migrate_v2_to_v3(&conn)?;
+                }
+                2 => migrate_v2_to_v3(&conn)?,
                 SCHEMA_VERSION => {}
                 _ => {
                     return Err(EngineError::Message(format!(
@@ -55,7 +83,7 @@ impl DepositLedger {
             for table in ["deposits", "legacy_credits", "deposit_outbox"] {
                 if table_exists(&conn, table)? {
                     return Err(EngineError::Message(
-                        "unversioned deposit ledger tables exist; refusing to stamp schema version 2"
+                        "unversioned deposit ledger tables exist; refusing to stamp schema version 3"
                             .into(),
                     ));
                 }
@@ -67,7 +95,7 @@ impl DepositLedger {
                key TEXT PRIMARY KEY,
                value INTEGER NOT NULL
              );
-             INSERT INTO schema_meta(key, value) VALUES ('version', 2)
+             INSERT INTO schema_meta(key, value) VALUES ('version', 3)
                ON CONFLICT(key) DO NOTHING;
              CREATE TABLE IF NOT EXISTS deposits (
                tx_id TEXT NOT NULL,
@@ -102,8 +130,13 @@ impl DepositLedger {
                lease_owner TEXT,
                lease_until INTEGER,
                attempts INTEGER NOT NULL DEFAULT 0,
-               last_error TEXT
+               last_error TEXT,
+               next_attempt_at INTEGER NOT NULL DEFAULT 0,
+               dead_lettered INTEGER NOT NULL DEFAULT 0 CHECK(dead_lettered IN (0,1)),
+               dead_lettered_at INTEGER
              );
+             CREATE INDEX IF NOT EXISTS deposit_outbox_delivery
+               ON deposit_outbox(acknowledged, dead_lettered, next_attempt_at, lease_until, id);
              COMMIT;",
         )?;
         let version: i64 = conn.query_row(
@@ -150,6 +183,9 @@ impl DepositLedger {
                 "lease_until",
                 "attempts",
                 "last_error",
+                "next_attempt_at",
+                "dead_lettered",
+                "dead_lettered_at",
             ],
         )?;
         require_columns(&conn, "legacy_credits", &["tx_id", "output_index"])?;
@@ -489,6 +525,66 @@ impl DepositLedger {
         Ok(events)
     }
 
+    pub fn outbox_statuses(&self, dead_only: bool) -> Result<Vec<OutboxEventStatus>> {
+        let mut statement = self.conn.prepare(
+            "SELECT id, event_key, kind, tx_id, output_index, amount_sompi, address,
+                    attempts, next_attempt_at, dead_lettered, dead_lettered_at, last_error
+             FROM deposit_outbox
+             WHERE acknowledged=0 AND (?1=0 OR dead_lettered=1)
+             ORDER BY id",
+        )?;
+        let rows = statement.query_map([i64::from(dead_only)], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, i64>(7)?,
+                row.get::<_, i64>(8)?,
+                row.get::<_, i64>(9)?,
+                row.get::<_, Option<i64>>(10)?,
+                row.get::<_, Option<String>>(11)?,
+            ))
+        })?;
+        let mut statuses = Vec::new();
+        for row in rows {
+            let (
+                id,
+                event_key,
+                kind,
+                tx_id,
+                output_index,
+                amount,
+                address,
+                attempts,
+                next_attempt_at,
+                dead_lettered,
+                dead_lettered_at,
+                last_error,
+            ) = row?;
+            statuses.push(OutboxEventStatus {
+                event: decode_event(id, event_key, kind, tx_id, output_index, amount, address)?,
+                attempts: u32::try_from(attempts)
+                    .map_err(|_| EngineError::Message("invalid outbox attempt count".into()))?,
+                next_attempt_at: u64::try_from(next_attempt_at)
+                    .map_err(|_| EngineError::Message("invalid outbox retry time".into()))?,
+                dead_lettered: dead_lettered != 0,
+                dead_lettered_at: dead_lettered_at
+                    .map(|value| {
+                        u64::try_from(value).map_err(|_| {
+                            EngineError::Message("invalid outbox dead-letter time".into())
+                        })
+                    })
+                    .transpose()?,
+                last_error,
+            });
+        }
+        Ok(statuses)
+    }
+
     pub fn unacknowledged_count(&self) -> Result<usize> {
         let count: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM deposit_outbox WHERE acknowledged=0",
@@ -520,6 +616,17 @@ impl DepositLedger {
         now_epoch_seconds: u64,
         lease_seconds: u64,
     ) -> Result<Option<LedgerEvent>> {
+        Ok(self
+            .claim_next_delivery(owner, now_epoch_seconds, lease_seconds)?
+            .map(|claim| claim.event))
+    }
+
+    pub fn claim_next_delivery(
+        &mut self,
+        owner: &str,
+        now_epoch_seconds: u64,
+        lease_seconds: u64,
+    ) -> Result<Option<ClaimedLedgerEvent>> {
         validate_lease(owner, lease_seconds)?;
         let now = to_i64(now_epoch_seconds, "outbox lease time")?;
         let lease_until = to_i64(
@@ -534,8 +641,9 @@ impl DepositLedger {
         let id: Option<i64> = tx
             .query_row(
                 "SELECT id FROM deposit_outbox
-                 WHERE acknowledged=0 AND (lease_until IS NULL OR lease_until<=?1)
-                 ORDER BY id LIMIT 1",
+                 WHERE acknowledged=0 AND dead_lettered=0 AND next_attempt_at<=?1
+                   AND (lease_until IS NULL OR lease_until<=?1)
+                 ORDER BY next_attempt_at, id LIMIT 1",
                 [now],
                 |row| row.get(0),
             )
@@ -546,8 +654,8 @@ impl DepositLedger {
         };
         let changed = tx.execute(
             "UPDATE deposit_outbox
-             SET lease_owner=?2, lease_until=?3, attempts=attempts+1, last_error=NULL
-             WHERE id=?1 AND acknowledged=0
+             SET lease_owner=?2, lease_until=?3, attempts=attempts+1
+             WHERE id=?1 AND acknowledged=0 AND dead_lettered=0 AND next_attempt_at<=?4
                AND (lease_until IS NULL OR lease_until<=?4)",
             params![id, owner, lease_until, now],
         )?;
@@ -557,7 +665,7 @@ impl DepositLedger {
             ));
         }
         let row = tx.query_row(
-            "SELECT id, event_key, kind, tx_id, output_index, amount_sompi, address
+            "SELECT id, event_key, kind, tx_id, output_index, amount_sompi, address, attempts
              FROM deposit_outbox WHERE id=?1 AND lease_owner=?2",
             params![id, owner],
             |row| {
@@ -569,13 +677,16 @@ impl DepositLedger {
                     row.get::<_, i64>(4)?,
                     row.get::<_, i64>(5)?,
                     row.get::<_, String>(6)?,
+                    row.get::<_, i64>(7)?,
                 ))
             },
         )?;
         tx.commit()?;
-        Ok(Some(decode_event(
-            row.0, row.1, row.2, row.3, row.4, row.5, row.6,
-        )?))
+        Ok(Some(ClaimedLedgerEvent {
+            event: decode_event(row.0, row.1, row.2, row.3, row.4, row.5, row.6)?,
+            attempts: u32::try_from(row.7)
+                .map_err(|_| EngineError::Message("invalid outbox attempt count".into()))?,
+        }))
     }
 
     pub fn acknowledge_claim(&mut self, id: i64, owner: &str) -> Result<()> {
@@ -596,12 +707,8 @@ impl DepositLedger {
 
     pub fn release_claim(&mut self, id: i64, owner: &str, error: &str) -> Result<()> {
         validate_owner(owner)?;
+        validate_delivery_error(error)?;
         let error = error.trim();
-        if error.is_empty() || error.len() > 1_024 {
-            return Err(EngineError::Message(
-                "outbox delivery error must be 1-1024 bytes".into(),
-            ));
-        }
         let changed = self.conn.execute(
             "UPDATE deposit_outbox
              SET lease_owner=NULL, lease_until=NULL, last_error=?3
@@ -611,6 +718,93 @@ impl DepositLedger {
         if changed != 1 {
             return Err(EngineError::Message(format!(
                 "outbox claim {id} is not owned by {owner}"
+            )));
+        }
+        Ok(())
+    }
+
+    pub fn fail_claim(
+        &mut self,
+        id: i64,
+        owner: &str,
+        error: &str,
+        now_epoch_seconds: u64,
+        next_attempt_at: u64,
+        max_attempts: u32,
+    ) -> Result<DeliveryFailureOutcome> {
+        validate_owner(owner)?;
+        validate_delivery_error(error)?;
+        if !(1..=100).contains(&max_attempts) {
+            return Err(EngineError::Message(
+                "outbox max attempts must be 1-100".into(),
+            ));
+        }
+        if next_attempt_at <= now_epoch_seconds {
+            return Err(EngineError::Message(
+                "outbox retry time must be after failure time".into(),
+            ));
+        }
+        let now = to_i64(now_epoch_seconds, "outbox failure time")?;
+        let next_attempt_at = to_i64(next_attempt_at, "outbox retry time")?;
+        let transaction = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let attempts: Option<i64> = transaction
+            .query_row(
+                "SELECT attempts FROM deposit_outbox
+                 WHERE id=?1 AND acknowledged=0 AND lease_owner=?2",
+                params![id, owner],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(attempts) = attempts else {
+            return Err(EngineError::Message(format!(
+                "outbox claim {id} is not owned by {owner}"
+            )));
+        };
+        let attempts_u32 = u32::try_from(attempts)
+            .map_err(|_| EngineError::Message("invalid outbox attempt count".into()))?;
+        let outcome = if attempts_u32 >= max_attempts {
+            transaction.execute(
+                "UPDATE deposit_outbox
+                 SET lease_owner=NULL, lease_until=NULL, last_error=?3,
+                     next_attempt_at=0, dead_lettered=1, dead_lettered_at=?4
+                 WHERE id=?1 AND acknowledged=0 AND lease_owner=?2",
+                params![id, owner, error.trim(), now],
+            )?;
+            DeliveryFailureOutcome::DeadLettered {
+                attempts: attempts_u32,
+            }
+        } else {
+            transaction.execute(
+                "UPDATE deposit_outbox
+                 SET lease_owner=NULL, lease_until=NULL, last_error=?3,
+                     next_attempt_at=?4
+                 WHERE id=?1 AND acknowledged=0 AND lease_owner=?2",
+                params![id, owner, error.trim(), next_attempt_at],
+            )?;
+            DeliveryFailureOutcome::RetryScheduled {
+                attempts: attempts_u32,
+                next_attempt_at: u64::try_from(next_attempt_at)
+                    .map_err(|_| EngineError::Message("invalid outbox retry time".into()))?,
+            }
+        };
+        transaction.commit()?;
+        Ok(outcome)
+    }
+
+    pub fn requeue_dead_letter(&mut self, id: i64, now_epoch_seconds: u64) -> Result<()> {
+        let now = to_i64(now_epoch_seconds, "outbox requeue time")?;
+        let changed = self.conn.execute(
+            "UPDATE deposit_outbox
+             SET dead_lettered=0, dead_lettered_at=NULL, attempts=0,
+                 next_attempt_at=?2, last_error=NULL, lease_owner=NULL, lease_until=NULL
+             WHERE id=?1 AND acknowledged=0 AND dead_lettered=1",
+            params![id, now],
+        )?;
+        if changed != 1 {
+            return Err(EngineError::Message(format!(
+                "outbox event {id} is not an unacknowledged dead letter"
             )));
         }
         Ok(())
@@ -648,6 +842,16 @@ fn validate_owner(owner: &str) -> Result<()> {
     Ok(())
 }
 
+fn validate_delivery_error(error: &str) -> Result<()> {
+    let error = error.trim();
+    if error.is_empty() || error.len() > 1_024 {
+        return Err(EngineError::Message(
+            "outbox delivery error must be 1-1024 bytes".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn validate_lease(owner: &str, lease_seconds: u64) -> Result<()> {
     validate_owner(owner)?;
     if !(1..=3_600).contains(&lease_seconds) {
@@ -666,6 +870,21 @@ fn migrate_v1_to_v2(conn: &Connection) -> Result<()> {
          ALTER TABLE deposit_outbox ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;
          ALTER TABLE deposit_outbox ADD COLUMN last_error TEXT;
          UPDATE schema_meta SET value=2 WHERE key='version' AND value=1;
+         COMMIT;",
+    )?;
+    Ok(())
+}
+
+fn migrate_v2_to_v3(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "BEGIN IMMEDIATE;
+         ALTER TABLE deposit_outbox ADD COLUMN next_attempt_at INTEGER NOT NULL DEFAULT 0;
+         ALTER TABLE deposit_outbox ADD COLUMN dead_lettered INTEGER NOT NULL DEFAULT 0
+           CHECK(dead_lettered IN (0,1));
+         ALTER TABLE deposit_outbox ADD COLUMN dead_lettered_at INTEGER;
+         CREATE INDEX deposit_outbox_delivery
+           ON deposit_outbox(acknowledged, dead_lettered, next_attempt_at, lease_until, id);
+         UPDATE schema_meta SET value=3 WHERE key='version' AND value=2;
          COMMIT;",
     )?;
     Ok(())
@@ -811,7 +1030,7 @@ mod tests {
     }
 
     #[test]
-    fn migrates_valid_v1_ledger_to_delivery_leases() {
+    fn migrates_valid_v1_ledger_to_retry_and_dead_letter_schema() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("v1.sqlite");
         let conn = Connection::open(&path).unwrap();
@@ -849,13 +1068,89 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
         require_columns(
             &ledger.conn,
             "deposit_outbox",
-            &["lease_owner", "lease_until", "attempts", "last_error"],
+            &[
+                "lease_owner",
+                "lease_until",
+                "attempts",
+                "last_error",
+                "next_attempt_at",
+                "dead_lettered",
+                "dead_lettered_at",
+            ],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn scheduled_failure_does_not_block_later_events_and_dead_letters_requeue() {
+        let mut ledger = DepositLedger::open(":memory:").unwrap();
+        let mut first_observed = observed(160);
+        first_observed.tx_id = "first".into();
+        let mut second_observed = observed(160);
+        second_observed.tx_id = "second".into();
+        let mut first_confirmed = confirmed();
+        first_confirmed.tx_id = "first".into();
+        let mut second_confirmed = confirmed();
+        second_confirmed.tx_id = "second".into();
+        ledger
+            .reconcile(
+                160,
+                &[first_observed, second_observed],
+                &[first_confirmed, second_confirmed],
+                &[],
+            )
+            .unwrap();
+
+        let first = ledger
+            .claim_next_delivery("worker", 100, 10)
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.event.tx_id, "first");
+        assert_eq!(first.attempts, 1);
+        assert_eq!(
+            ledger
+                .fail_claim(first.event.id, "worker", "HTTP 503", 100, 200, 3)
+                .unwrap(),
+            DeliveryFailureOutcome::RetryScheduled {
+                attempts: 1,
+                next_attempt_at: 200,
+            }
+        );
+
+        let second = ledger
+            .claim_next_delivery("worker", 101, 10)
+            .unwrap()
+            .unwrap();
+        assert_eq!(second.event.tx_id, "second");
+        assert_eq!(
+            ledger
+                .fail_claim(second.event.id, "worker", "HTTP 400", 101, 102, 1)
+                .unwrap(),
+            DeliveryFailureOutcome::DeadLettered { attempts: 1 }
+        );
+        assert!(ledger
+            .claim_next_delivery("worker", 150, 10)
+            .unwrap()
+            .is_none());
+
+        let statuses = ledger.outbox_statuses(false).unwrap();
+        assert_eq!(statuses.len(), 2);
+        assert_eq!(statuses[0].next_attempt_at, 200);
+        assert!(!statuses[0].dead_lettered);
+        assert!(statuses[1].dead_lettered);
+        assert_eq!(ledger.outbox_statuses(true).unwrap().len(), 1);
+
+        ledger.requeue_dead_letter(second.event.id, 150).unwrap();
+        let requeued = ledger
+            .claim_next_delivery("worker", 150, 10)
+            .unwrap()
+            .unwrap();
+        assert_eq!(requeued.event.id, second.event.id);
+        assert_eq!(requeued.attempts, 1);
     }
 
     #[test]
