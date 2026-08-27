@@ -22,6 +22,7 @@ pub mod kasplex;
 pub mod kip2_sat;
 pub mod krc20;
 pub mod l2;
+pub mod mtls;
 pub mod network;
 pub mod outbox_receiver;
 pub mod owned_node;

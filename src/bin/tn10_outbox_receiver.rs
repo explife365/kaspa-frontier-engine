@@ -32,6 +32,9 @@ struct AppState {
 struct Options {
     bind: SocketAddr,
     database: PathBuf,
+    tls_cert: Option<PathBuf>,
+    tls_key: Option<PathBuf>,
+    tls_client_ca: Option<PathBuf>,
 }
 
 #[derive(Serialize)]
@@ -54,7 +57,7 @@ struct ErrorResponse {
 }
 
 fn usage() -> &'static str {
-    "usage: tn10-outbox-receiver [--bind 127.0.0.1:18320] [--database PATH]"
+    "usage: tn10-outbox-receiver [--bind 127.0.0.1:18320] [--database PATH] [--tls-cert PEM] [--tls-key PEM] [--tls-client-ca PEM]"
 }
 
 fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, String> {
@@ -62,6 +65,9 @@ fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, St
         .parse::<SocketAddr>()
         .expect("valid default bind");
     let mut database = PathBuf::from(DEFAULT_DATABASE);
+    let mut tls_cert = None;
+    let mut tls_key = None;
+    let mut tls_client_ca = None;
     let mut args = arguments.into_iter();
     while let Some(argument) = args.next() {
         match argument.as_str() {
@@ -73,16 +79,43 @@ fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, St
                     .map_err(|_| "--bind must be an IP socket address")?;
             }
             "--database" => database = PathBuf::from(args.next().ok_or("--database needs a path")?),
+            "--tls-cert" => {
+                tls_cert = Some(PathBuf::from(args.next().ok_or("--tls-cert needs a path")?))
+            }
+            "--tls-key" => {
+                tls_key = Some(PathBuf::from(args.next().ok_or("--tls-key needs a path")?))
+            }
+            "--tls-client-ca" => {
+                tls_client_ca = Some(PathBuf::from(
+                    args.next().ok_or("--tls-client-ca needs a path")?,
+                ))
+            }
             _ => return Err(format!("unknown argument {argument}")),
         }
     }
     if !bind.ip().is_loopback() {
         return Err(
-            "receiver must bind to loopback; place an authenticated TLS proxy in front of it"
+            "receiver must bind to loopback; place authenticated mTLS on this bind, not a public socket"
                 .into(),
         );
     }
-    Ok(Options { bind, database })
+    match (
+        tls_cert.is_some(),
+        tls_key.is_some(),
+        tls_client_ca.is_some(),
+    ) {
+        (false, false, false) | (true, true, true) => {}
+        _ => {
+            return Err("mTLS requires --tls-cert, --tls-key, and --tls-client-ca together".into())
+        }
+    }
+    Ok(Options {
+        bind,
+        database,
+        tls_cert,
+        tls_key,
+        tls_client_ca,
+    })
 }
 
 fn app(store: Arc<Mutex<OutboxReceiverStore>>) -> Router {
@@ -221,12 +254,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let store = Arc::new(Mutex::new(OutboxReceiverStore::open(&options.database)?));
-    let listener = TcpListener::bind(options.bind).await?;
-    println!("listen      http://{}", options.bind);
-    println!("endpoint    /kaspa-events");
-    println!("database    {}", options.database.display());
-    println!("security    loopback only; use authenticated TLS proxy for remote delivery");
-    axum::serve(listener, app(store)).await?;
+    match (
+        options.tls_cert.as_deref(),
+        options.tls_key.as_deref(),
+        options.tls_client_ca.as_deref(),
+    ) {
+        (Some(cert), Some(key), Some(client_ca)) => {
+            let config = kaspa_frontier_engine::mtls::server_config(cert, key, client_ca)?;
+            let listener = TcpListener::bind(options.bind).await?;
+            println!("listen      https://{}", options.bind);
+            println!("endpoint    /kaspa-events");
+            println!("database    {}", options.database.display());
+            println!("security    loopback mTLS; client certificate required");
+            axum::serve(
+                kaspa_frontier_engine::mtls::TlsIncoming::new(listener, config),
+                app(store),
+            )
+            .await?;
+        }
+        _ => {
+            let listener = TcpListener::bind(options.bind).await?;
+            println!("listen      http://{}", options.bind);
+            println!("endpoint    /kaspa-events");
+            println!("database    {}", options.database.display());
+            println!(
+                "security    loopback HTTP; pass --tls-cert --tls-key --tls-client-ca for mTLS"
+            );
+            axum::serve(listener, app(store)).await?;
+        }
+    }
     Ok(())
 }
 
@@ -236,6 +292,9 @@ mod tests {
     use axum::body::{to_bytes, Body};
     use axum::http::Request;
     use tower::ServiceExt;
+
+    #[path = "../../mtls_test_support.rs"]
+    mod mtls_test_support;
 
     const ADDRESS: &str = "kaspatest:qptv6u8kel95drh2p2z492cyksk8lpetep286fngqu5j9nk57g642lzf748kt";
 
@@ -268,6 +327,17 @@ mod tests {
     fn parser_refuses_public_bind() {
         assert!(parse_args(["--bind".into(), "127.0.0.1:19000".into()]).is_ok());
         assert!(parse_args(["--bind".into(), "0.0.0.0:19000".into()]).is_err());
+        assert!(parse_args(["--tls-cert".into(), "server.pem".into()]).is_err());
+        let tls = parse_args([
+            "--tls-cert".into(),
+            "server.pem".into(),
+            "--tls-key".into(),
+            "server.key".into(),
+            "--tls-client-ca".into(),
+            "ca.pem".into(),
+        ])
+        .unwrap();
+        assert!(tls.tls_cert.is_some() && tls.tls_key.is_some() && tls.tls_client_ca.is_some());
     }
 
     #[tokio::test]
@@ -286,5 +356,52 @@ mod tests {
         assert!(String::from_utf8(body.to_vec())
             .unwrap()
             .contains("Idempotency-Key"));
+    }
+
+    #[tokio::test]
+    async fn mtls_health_requires_client_certificate() {
+        let dir = tempfile::tempdir().unwrap();
+        let pems = mtls_test_support::write_into(dir.path());
+        let config = kaspa_frontier_engine::mtls::server_config(
+            &pems.server_cert,
+            &pems.server_key,
+            &pems.ca,
+        )
+        .unwrap();
+        let store = Arc::new(Mutex::new(OutboxReceiverStore::open(":memory:").unwrap()));
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(
+                kaspa_frontier_engine::mtls::TlsIncoming::new(listener, config),
+                app(store),
+            )
+            .await
+            .unwrap();
+        });
+
+        let url = format!("https://127.0.0.1:{}/health", address.port());
+        let ca = reqwest::Certificate::from_pem(&std::fs::read(&pems.ca).unwrap()).unwrap();
+        let unsigned = reqwest::Client::builder()
+            .add_root_certificate(ca.clone())
+            .https_only(true)
+            .http1_only()
+            .build()
+            .unwrap();
+        assert!(unsigned.get(&url).send().await.is_err());
+
+        let mut identity = std::fs::read(&pems.client_cert).unwrap();
+        identity.extend(std::fs::read(&pems.client_key).unwrap());
+        let signed = reqwest::Client::builder()
+            .add_root_certificate(ca)
+            .identity(reqwest::Identity::from_pem(&identity).unwrap())
+            .https_only(true)
+            .http1_only()
+            .build()
+            .unwrap();
+        let response = signed.get(&url).send().await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(response.text().await.unwrap().contains("\"healthy\":true"));
+        server.abort();
     }
 }

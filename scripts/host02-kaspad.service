@@ -1,0 +1,20 @@
+[Unit]
+Description=Kaspa TN10 failover kaspad (loopback RPC only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kaspad
+Group=kaspad
+Nice=15
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+WorkingDirectory=/var/lib/kaspa/tn10
+ExecStart=/opt/kaspa/v2.0.1/kaspad --yes --testnet --netsuffix=10 --utxoindex --disable-upnp --rpclisten=127.0.0.1:16210 --rpclisten-json=127.0.0.1:18210 --listen=0.0.0.0:16211 --appdir /var/lib/kaspa/tn10
+Restart=on-failure
+RestartSec=10
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

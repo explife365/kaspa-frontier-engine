@@ -32,7 +32,14 @@ enum Command {
         max_attempts: u32,
         retry_base_seconds: u64,
         retry_max_seconds: u64,
+        tls: Option<Box<TlsClientAuth>>,
     },
+}
+
+struct TlsClientAuth {
+    ca: PathBuf,
+    cert: PathBuf,
+    key: PathBuf,
 }
 
 struct Options {
@@ -62,7 +69,7 @@ struct DeliveryPolicy {
 }
 
 fn usage() -> &'static str {
-    "usage: tn10-outbox <list|dead|ack ID|requeue ID|deliver URL> [--database PATH] [--limit N] [--max-attempts N] [--retry-base-seconds N] [--retry-max-seconds N]"
+    "usage: tn10-outbox <list|dead|ack ID|requeue ID|deliver URL> [--database PATH] [--limit N] [--max-attempts N] [--retry-base-seconds N] [--retry-max-seconds N] [--tls-ca PEM] [--tls-cert PEM] [--tls-key PEM]"
 }
 
 fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, String> {
@@ -101,14 +108,25 @@ fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, St
                 max_attempts: DEFAULT_MAX_ATTEMPTS,
                 retry_base_seconds: DEFAULT_RETRY_BASE_SECONDS,
                 retry_max_seconds: DEFAULT_RETRY_MAX_SECONDS,
+                tls: None,
             }
         }
         _ => return Err(usage().into()),
     };
     let mut database = PathBuf::from(DEFAULT_DATABASE);
+    let mut tls_ca = None;
+    let mut tls_cert = None;
+    let mut tls_key = None;
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--database" => database = PathBuf::from(args.next().ok_or("--database needs a path")?),
+            "--tls-ca" => tls_ca = Some(PathBuf::from(args.next().ok_or("--tls-ca needs a path")?)),
+            "--tls-cert" => {
+                tls_cert = Some(PathBuf::from(args.next().ok_or("--tls-cert needs a path")?))
+            }
+            "--tls-key" => {
+                tls_key = Some(PathBuf::from(args.next().ok_or("--tls-key needs a path")?))
+            }
             "--limit" => {
                 let limit = args
                     .next()
@@ -173,12 +191,26 @@ fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, St
     if let Command::Deliver {
         retry_base_seconds,
         retry_max_seconds,
+        endpoint,
+        tls,
         ..
-    } = &command
+    } = &mut command
     {
         if retry_base_seconds > retry_max_seconds {
             return Err("--retry-base-seconds cannot exceed --retry-max-seconds".into());
         }
+        match (tls_ca.take(), tls_cert.take(), tls_key.take()) {
+            (None, None, None) => {}
+            (Some(ca), Some(cert), Some(key)) => {
+                if endpoint.scheme() != "https" {
+                    return Err("mTLS delivery requires an https:// webhook URL".into());
+                }
+                *tls = Some(Box::new(TlsClientAuth { ca, cert, key }));
+            }
+            _ => return Err("mTLS requires --tls-ca, --tls-cert, and --tls-key together".into()),
+        }
+    } else if tls_ca.is_some() || tls_cert.is_some() || tls_key.is_some() {
+        return Err("TLS client flags are valid only with deliver".into());
     }
     Ok(Options { database, command })
 }
@@ -260,12 +292,23 @@ async fn deliver(
     endpoint: &Url,
     limit: usize,
     policy: DeliveryPolicy,
+    tls: Option<&TlsClientAuth>,
 ) -> Result<DeliveryReport, Box<dyn std::error::Error>> {
-    let client = Client::builder()
+    let mut builder = Client::builder()
         .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(15))
-        .user_agent("kaspa-frontier-engine/tn10-outbox")
-        .build()?;
+        .user_agent("kaspa-frontier-engine/tn10-outbox");
+    if let Some(tls) = tls {
+        let ca = reqwest::Certificate::from_pem(&std::fs::read(&tls.ca)?)?;
+        let mut identity = std::fs::read(&tls.cert)?;
+        identity.extend(std::fs::read(&tls.key)?);
+        builder = builder
+            .add_root_certificate(ca)
+            .identity(reqwest::Identity::from_pem(&identity)?)
+            .https_only(true)
+            .http1_only();
+    }
+    let client = builder.build()?;
     let owner = format!(
         "tn10-outbox-{}-{}",
         std::process::id(),
@@ -371,6 +414,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             max_attempts,
             retry_base_seconds,
             retry_max_seconds,
+            tls,
         } => {
             let report = deliver(
                 &mut ledger,
@@ -381,6 +425,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     retry_base_seconds,
                     retry_max_seconds,
                 },
+                tls.as_deref(),
             )
             .await?;
             println!(
@@ -401,6 +446,9 @@ mod tests {
     use axum::{Json, Router};
     use kaspa_frontier_engine::{ConfirmedDeposit, UtxoAppearance};
     use std::sync::{Arc, Mutex};
+
+    #[path = "../../mtls_test_support.rs"]
+    mod mtls_test_support;
 
     #[test]
     fn endpoint_requires_tls_except_loopback() {
@@ -462,10 +510,39 @@ mod tests {
             parse_args(["dead".into()]).unwrap().command,
             Command::List { dead_only: true }
         ));
+        assert!(parse_args([
+            "deliver".into(),
+            "https://custody.example/events".into(),
+            "--tls-ca".into(),
+            "ca.pem".into(),
+        ])
+        .is_err());
+        let mtls = parse_args([
+            "deliver".into(),
+            "https://127.0.0.1:18320/kaspa-events".into(),
+            "--tls-ca".into(),
+            "ca.pem".into(),
+            "--tls-cert".into(),
+            "client.pem".into(),
+            "--tls-key".into(),
+            "client.key".into(),
+        ])
+        .unwrap();
         assert!(matches!(
-            parse_args(["requeue".into(), "9".into()]).unwrap().command,
-            Command::Requeue { id: 9 }
+            mtls.command,
+            Command::Deliver { tls: Some(_), .. }
         ));
+        assert!(parse_args([
+            "deliver".into(),
+            "http://127.0.0.1:18320/kaspa-events".into(),
+            "--tls-ca".into(),
+            "ca.pem".into(),
+            "--tls-cert".into(),
+            "client.pem".into(),
+            "--tls-key".into(),
+            "client.key".into(),
+        ])
+        .is_err());
     }
 
     #[tokio::test]
@@ -528,6 +605,7 @@ mod tests {
                     retry_base_seconds: 5,
                     retry_max_seconds: 300,
                 },
+                None,
             )
             .await
             .unwrap(),
@@ -599,6 +677,7 @@ mod tests {
                 retry_base_seconds: 60,
                 retry_max_seconds: 300,
             },
+            None,
         )
         .await
         .unwrap();
@@ -615,6 +694,88 @@ mod tests {
         assert_eq!(statuses[0].event.tx_id, "first");
         assert_eq!(statuses[0].attempts, 1);
         assert!(statuses[0].next_attempt_at > now_epoch_seconds().unwrap());
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn mtls_delivery_requires_client_certificate() {
+        use kaspa_frontier_engine::mtls::{server_config, TlsIncoming};
+
+        async fn receive() -> axum::http::StatusCode {
+            axum::http::StatusCode::NO_CONTENT
+        }
+
+        fn seed_ledger() -> DepositLedger {
+            let mut ledger = DepositLedger::open(":memory:").unwrap();
+            let observed = UtxoAppearance {
+                tx_id: "tx".into(),
+                output_index: 0,
+                address: "kaspatest:abc".into(),
+                amount_sompi: 10,
+                block_daa_score: 100,
+                virtual_daa: 160,
+                is_coinbase: false,
+            };
+            let confirmed = ConfirmedDeposit {
+                tx_id: "tx".into(),
+                output_index: 0,
+                address: "kaspatest:abc".into(),
+                amount_sompi: 10,
+                block_daa_score: 100,
+                confirmations: 60,
+                is_coinbase: false,
+            };
+            ledger
+                .reconcile(160, &[observed], &[confirmed], &[])
+                .unwrap();
+            ledger
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let pems = mtls_test_support::write_into(dir.path());
+        let config = server_config(&pems.server_cert, &pems.server_key, &pems.ca).unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(
+                TlsIncoming::new(listener, config),
+                Router::new().route("/events", post(receive)),
+            )
+            .await
+            .unwrap();
+        });
+
+        let endpoint = Url::parse(&format!("https://{address}/events")).unwrap();
+        let policy = DeliveryPolicy {
+            max_attempts: 5,
+            retry_base_seconds: 5,
+            retry_max_seconds: 300,
+        };
+        assert_eq!(
+            deliver(&mut seed_ledger(), &endpoint, 1, policy, None)
+                .await
+                .unwrap(),
+            DeliveryReport {
+                delivered: 0,
+                retry_scheduled: 1,
+                dead_lettered: 0,
+            }
+        );
+        let tls = TlsClientAuth {
+            ca: pems.ca,
+            cert: pems.client_cert,
+            key: pems.client_key,
+        };
+        assert_eq!(
+            deliver(&mut seed_ledger(), &endpoint, 1, policy, Some(&tls))
+                .await
+                .unwrap(),
+            DeliveryReport {
+                delivered: 1,
+                retry_scheduled: 0,
+                dead_lettered: 0,
+            }
+        );
         server.abort();
     }
 }

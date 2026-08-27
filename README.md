@@ -105,6 +105,17 @@ cargo run --release --bin tn10-node-health -- --url ws://127.0.0.1:18210 --url w
 For production, place those ports behind loopback-only tunnels or sidecars connected to
 operationally independent kaspad hosts; two ports on one host do not remove host-level failure.
 
+A second TN10 replica is on host02 (`kaspad-tn10.service`, rusty-kaspa v2.0.1, JSON/gRPC bound to
+`127.0.0.1` only, P2P `16211/tcp`). Bring its wRPC onto this workstation without opening 18210
+to the world:
+
+```powershell
+powershell -File scripts/tn10_host02_tunnel.ps1
+cargo run --release --bin tn10-node-health -- --url ws://127.0.0.1:18210 --url ws://127.0.0.1:28210 --min-healthy 2 --json
+```
+
+The tunnel stays on loopback and reconnects after SSH resets. After host02 finished IBD, `--min-healthy 2` is green when the local node is also within 100 DAA.
+
 The deposit outbox never auto-acknowledges. Inspect it, explicitly acknowledge a manually
 handled event, or deliver leased events to an HTTPS webhook:
 
@@ -114,7 +125,7 @@ cargo run --bin tn10-outbox -- list
 cargo run --bin tn10-outbox -- dead
 cargo run --bin tn10-outbox -- requeue 1
 cargo run --bin tn10-outbox -- ack 1
-cargo run --bin tn10-outbox -- deliver http://127.0.0.1:18320/kaspa-events --limit 100 --max-attempts 5 --retry-base-seconds 5 --retry-max-seconds 300
+cargo run --release --bin tn10-outbox -- deliver http://127.0.0.1:18320/kaspa-events
 ```
 
 For the REST polling database, add `--database .local/tn10-deposits.sqlite`. Webhook requests
@@ -130,8 +141,17 @@ migrate transactionally to schema v3.
 `tn10-outbox-receiver` validates the versioned body, exact TN10 address and
 `credit|reverse:<txid>:<vout>` key before a FULL-synchronous transaction inserts it. The first
 delivery returns 201, an identical retry returns 200, and reuse of a key with different facts
-returns 409 without changing the inbox. It binds only to loopback; remote production delivery
-must put it behind an authenticated TLS proxy and keep the receiver SQLite volume durable.
+returns 409 without changing the inbox. It binds only to loopback. For authenticated delivery
+on that bind, generate a rehearsal CA and require a client certificate:
+
+```powershell
+powershell -File scripts/tn10_receiver_mtls_certs.ps1
+cargo run --release --bin tn10-outbox-receiver -- --tls-cert .local/tn10-mtls/server.pem --tls-key .local/tn10-mtls/server.key --tls-client-ca .local/tn10-mtls/ca.pem
+cargo run --release --bin tn10-outbox -- deliver https://127.0.0.1:18320/kaspa-events --tls-ca .local/tn10-mtls/ca.pem --tls-cert .local/tn10-mtls/client.pem --tls-key .local/tn10-mtls/client.key
+```
+
+Remote production still keeps this process on loopback and terminates TLS in front of it
+(or uses these PEM flags). Do not bind 18320 on a public address.
 
 Withdrawal expectations and the first exact destination-output observation are also stored
 under SQLite WAL with `synchronous=FULL`. A restart can therefore confirm an accepted
@@ -192,7 +212,7 @@ From kaspa.orgâ€™s integrator call, the Toccata guide, and kascov (not Discord â
 | KRC-20 commit/reveal vs `tn10api.kasplex.org` | Kasplex | `tn10-kasplex` + `examples/kasplex_krc20.py`. Frontier tick **TMBMN** is live (mint+transfer). Not USD. `--deploy` of a crate-owned tick burns **1000 tKAS**. |
 | DAGKnight / 100 BPS lore | Narrative only | KIP-2 Proposed. Live is GHOSTDAG @ 10 BPS. Fake telemetry does not activate it. Refused. |
 | Archival / indexer cost | Exchanges / ops | Need `getUtxosByAddresses` + DAA depth, not a simulated worker. `cex::snapshot_address` + `tn10-deposits` / `tn10-withdraw`. |
-| CEX integration rehearsal | Integrator call / `Kaspa to do.pdf` | Partial: bounded multi-address snapshots/ingestion, durable exact withdrawals, scheduled/dead-letter idempotency-key webhook outbox, atomic deduplicating receiver inbox, delta-driven durable wRPC replay, owned-node reconnect resnapshots, and a supervisor health gate. Production custody still requires redundant node operations and authenticated TLS deployment. |
+| CEX integration rehearsal | Integrator call / `Kaspa to do.pdf` | Partial: bounded multi-address snapshots/ingestion, durable exact withdrawals, scheduled/dead-letter idempotency-key webhook outbox, atomic deduplicating receiver inbox, delta-driven durable wRPC replay, ordered owned-node failover, N-of-M supervisor health, and loopback mTLS on the webhook receiver. host02 is the independent replica (synced; tunnel `127.0.0.1:28210`). Live wrpc-live failed over from local 18210 to host02 28210. Do not bind 18210/18320 publicly. |
 
 Do **not** open unofficial consensus PRs against rusty-kaspa. Acceptable PRs there follow their review process and KIPs.
 
