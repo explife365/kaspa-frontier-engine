@@ -16,7 +16,7 @@ https://explorer.kaspa.org/addresses/kaspa:qpxdemlyx445kt5xteux0qhadaw8lh5m0vnqv
 
 Canonical public home: **https://github.com/explife365/kaspa-frontier-engine**
 
-Copy-paste intro for Discord or GitHub discussions: [`scripts/kaspa_dev_share_post.txt`](scripts/kaspa_dev_share_post.txt). SDK `computeBudget` gate: `python scripts/tn10_sdk_gate.py --json`. Nudge text for [kaspa-python-sdk PR #78](https://github.com/kaspanet/kaspa-python-sdk/pull/78): [`scripts/sdk_pr78_pr_comment.txt`](scripts/sdk_pr78_pr_comment.txt).
+Copy-paste intro for Discord or GitHub discussions: [`scripts/kaspa_dev_share_post.txt`](scripts/kaspa_dev_share_post.txt). SDK `computeBudget` gate: `python scripts/tn10_sdk_gate.py --json`. Nudge text for [kaspa-python-sdk PR #78](https://github.com/kaspanet/kaspa-python-sdk/pull/78): [`scripts/sdk_pr78_pr_comment.txt`](scripts/sdk_pr78_pr_comment.txt). CEX production checklist: [`scripts/cex_production_runbook.md`](scripts/cex_production_runbook.md). `getUtxosByCovenantId` KIP outline: [`scripts/getUtxosByCovenantId_kip_outline.md`](scripts/getUtxosByCovenantId_kip_outline.md).
 
 Not kaspad, not consensus, not an exchange listing path â€” TN10 rehearsal only.
 
@@ -119,16 +119,16 @@ JSON reports include `stage` / `stageLabel` per node (`utxo_commit`, `body_sync`
 For production, place those ports behind loopback-only tunnels or sidecars connected to
 operationally independent kaspad hosts; two ports on one host do not remove host-level failure.
 
-A second TN10 replica is on host02 (`kaspad-tn10.service`, rusty-kaspa v2.0.1, JSON/gRPC bound to
-`127.0.0.1` only, P2P `16211/tcp`). Bring its wRPC onto this workstation without opening 18210
-to the world:
+A second TN10 owned node (node 2) runs rusty-kaspa v2.0.1 with JSON/gRPC bound to
+`127.0.0.1` only. Forward its wRPC to loopback port 28210 without exposing 18210
+publicly:
 
 ```powershell
 powershell -File scripts/tn10_host02_tunnel.ps1
 cargo run --release --bin tn10-node-health -- --dual --min-healthy 2 --json
 ```
 
-The tunnel stays on loopback and reconnects after SSH resets. `--min-healthy 2` is green when both replicas are synced and within 100 DAA.
+The tunnel stays on loopback and reconnects after transport resets. `--min-healthy 2` is green when both nodes are synced and within 100 DAA.
 
 The deposit outbox never auto-acknowledges. Inspect it, explicitly acknowledge a manually
 handled event, or deliver leased events to an HTTPS webhook:
@@ -219,7 +219,7 @@ From kaspa.orgâ€™s integrator call, the Toccata guide, and kascov (not Discord â
 
 | Ask | Who | This crate |
 | --- | --- | --- |
-| Run a TN10 node and test deposits / withdrawals / indexing / tx parsing | Core, pools, exchanges | `tn10-deposits` + restart-safe `tn10-withdraw` (REST DAA). Owned kaspad v2.0.1 uses `--appdir %LOCALAPPDATA%\kaspa\tn10`; `tn10-node-health` fail-closes on UTXO import (DAA 0), IBD peers, header/body gap, lag, and N-of-M. Dual `--min-healthy 2` when laptop + host02 tunnel are synced. We do not ship kaspad. |
+| Run a TN10 node and test deposits / withdrawals / indexing / tx parsing | Core, pools, exchanges | `tn10-deposits` + restart-safe `tn10-withdraw` (REST DAA). Owned kaspad v2.0.1 uses `--appdir %LOCALAPPDATA%\kaspa\tn10`; `tn10-node-health` fail-closes on UTXO import (DAA 0), IBD peers, header/body gap, lag, and N-of-M. Dual `--min-healthy 2` when node 1 and node 2 are synced. We do not ship kaspad. |
 | Parse v1 txs: `storageMass`, `compute_budget`, output `covenant_id` | rusty-kaspa Toccata guide | `tn10-proof` requires exact selected-output lineage and the complete previous outpoint of each covenant-authorizing input |
 | Fee estimation rehearsal | kaspa.org integrator call | `tn10-status` and `tn10_transfer.py` print `/info/fee-estimate` (minimum standard mempool/RPC policy, not consensus) |
 | Wallet / explorer covenant decode (UX lag) | Core R&D | Toccata is live (~517 mainnet covenants vs ~80k TN10). We print lineage; Covex / [kascov](https://kascov.io/) are the UIs. |
@@ -229,7 +229,7 @@ From kaspa.orgâ€™s integrator call, the Toccata guide, and kascov (not Discord â
 | KRC-20 commit/reveal vs `tn10api.kasplex.org` | Kasplex | `tn10-kasplex` + `examples/kasplex_krc20.py`. Frontier tick **TMBMN** is live (mint+transfer). Not USD. `--deploy` of a crate-owned tick burns **1000 tKAS**. |
 | DAGKnight / 100 BPS lore | Narrative only | KIP-2 Proposed. Live is GHOSTDAG @ 10 BPS. Fake telemetry does not activate it. Refused. |
 | Archival / indexer cost | Exchanges / ops | Need `getUtxosByAddresses` + DAA depth, not a simulated worker. `cex::snapshot_address` + `tn10-deposits` / `tn10-withdraw`. |
-| CEX integration rehearsal | Integrator call / `Kaspa to do.pdf` | Partial: bounded multi-address snapshots/ingestion, durable exact withdrawals, scheduled/dead-letter idempotency-key webhook outbox, atomic deduplicating receiver inbox, delta-driven durable wRPC replay, ordered owned-node failover, N-of-M supervisor health, loopback mTLS on the webhook receiver, and mTLS required to deliver off-loopback. host02 is the independent replica (tunnel `127.0.0.1:28210`). Do not bind 18210/18320 publicly. |
+| CEX integration rehearsal | Integrator call / `Kaspa to do.pdf` | Partial: bounded multi-address snapshots/ingestion, durable exact withdrawals, scheduled/dead-letter idempotency-key webhook outbox, atomic deduplicating receiver inbox, delta-driven durable wRPC replay, ordered owned-node failover, N-of-M supervisor health, loopback mTLS on the webhook receiver, and mTLS required to deliver off-loopback. Node 2 is reached via loopback tunnel (`127.0.0.1:28210`). Do not bind 18210/18320 publicly. |
 
 Do **not** open unofficial consensus PRs against rusty-kaspa. Acceptable PRs there follow their review process and KIPs.
 

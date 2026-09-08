@@ -1,5 +1,5 @@
 # Quick TN10 integrator rehearsal: IBD watch, N-of-M gate, dual wrpc resnapshot.
-# Not consensus evidence. Requires laptop kaspad + host02 tunnel (28210).
+# Not consensus evidence. Requires two loopback TN10 nodes (18210 + 28210).
 param(
     [switch]$Covenant
 )

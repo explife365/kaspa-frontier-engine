@@ -13,8 +13,8 @@ from pathlib import Path
 import websockets
 
 NODES = (
-    ("laptop", "ws://127.0.0.1:18210"),
-    ("replica", "ws://127.0.0.1:28210"),
+    ("node1", "ws://127.0.0.1:18210"),
+    ("node2", "ws://127.0.0.1:28210"),
 )
 
 
@@ -188,7 +188,7 @@ async def main(argv: list[str] | None = None) -> int:
         if "error" in row:
             print(f"{row['name']:<8} ERROR  {row['error']}")
             continue
-        utxo_hint = utxoindex if row["name"] == "laptop" else None
+        utxo_hint = utxoindex if row["name"] == "node1" else None
         ibd_label = "?" if row["ibd_peers"] is None else f"{row['ibd_peers']:>2}"
         print(
             f"{row['name']:<8} DAA {row['daa']:>12} "

@@ -1,0 +1,15 @@
+Cross-link: public TN10 integrator rehearsal with a fail-closed SDK gate for this failure mode:
+
+https://github.com/explife365/kaspa-frontier-engine
+
+`TransactionInput.compute_budget` is set in memory but dropped on `to_dict()` in pinned `kaspa` 2.0.2rc1, so RPC round-trip zeros the budget → "script units exceeded" on TN10.
+
+Repro:
+
+```bash
+python scripts/tn10_sdk_gate.py --json
+```
+
+Fix tracked in [kaspa-python-sdk#78](https://github.com/kaspanet/kaspa-python-sdk/pull/78) (`computeBudget` in `TryToPyDict`). Not rusty-kaspa#1074 (WASM generator).
+
+Three SilverScript reference apps are ready to broadcast and publish proof fixtures once a **published wheel** includes the fix.

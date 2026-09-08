@@ -1,0 +1,14 @@
+Public integrator rehearsal repo (not kaspad, not consensus):
+
+https://github.com/explife365/kaspa-frontier-engine
+
+Adds reproducible TN10 evidence for the topics in this thread:
+
+- **SDK gate:** `python scripts/tn10_sdk_gate.py --json` — `computeBudgetOk: false` on pinned `kaspa` 2.0.2rc1; blocks SilverScript covenant broadcast until [kaspa-python-sdk#78](https://github.com/kaspanet/kaspa-python-sdk/pull/78) merges and publishes.
+- **Covenant proofs:** `tn10-proof` with counter / timelock vault / restricted swap profiles; reference apps under `examples/silverscript/` (broadcast fail-closed until SDK wheel).
+- **`getUtxosByCovenantId` gap:** bounded `tn10-covenant-rpc` shim (REST + kascov); KIP outline in `scripts/getUtxosByCovenantId_kip_outline.md`.
+- **CEX rehearsal:** N-of-M owned-node gate (node 1 + node 2), durable deposits/withdrawals, webhook outbox with idempotency keys — see `scripts/cex_production_runbook.md`.
+
+One-shot rehearsal: `powershell -File scripts/tn10_rehearsal.ps1 -Covenant`
+
+Still not a KIP-2 activation argument. Live protocol remains GHOSTDAG @ 10 BPS.

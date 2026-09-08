@@ -3,7 +3,7 @@ TN10 integrator rehearsal crate (public) — not kaspad, not consensus
 Repo: https://github.com/explife365/kaspa-frontier-engine
 
 What ships today on testnet-10:
-- N-of-M owned-node health gate (dual laptop + replica wrpc)
+- N-of-M owned-node health gate (two operationally independent TN10 nodes)
 - Durable deposits / withdrawals with DAA confirmation + SQLite restart safety
 - wRPC live ingestion + subscribe-ack journal replay (rusty-kaspa#939 pattern)
 - Bounded tn10-covenant-rpc shim (REST + kascov; not kaspad getUtxosByCovenantId)

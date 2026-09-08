@@ -10,7 +10,7 @@ python scripts/tn10_sdk_gate.py --json
 
 Current output: `computeBudgetOk: false`, `silverscriptOk: true`, PR #78 `OPEN`.
 
-Three reference covenant apps (counter, timelock vault, restricted swap) are ready to broadcast once a **published wheel** includes this fix **and** the SilverScript native extension (git-only pip builds on Windows dropped silverscript in our environment).
+Three reference covenant apps (counter, timelock vault, restricted swap) are ready to broadcast once a **published wheel** includes this fix **and** the SilverScript native extension (git-only pip installs have dropped the extension in some environments).
 
 Not in scope: rusty-kaspa#1074 (WASM wallet generator). Not a kaspad change.
 

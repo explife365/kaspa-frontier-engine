@@ -1,0 +1,13 @@
+Item 4 (compile-time compute budget) is related but separate from the current **broadcast blocker**: pinned `kaspa` 2.0.2rc1 drops `computeBudget` on `TransactionInput.to_dict()`, so any submit path that round-trips through dict/JSON silently zeros the budget.
+
+Public integrator gate + reference covenant apps:
+
+https://github.com/explife365/kaspa-frontier-engine
+
+```bash
+python scripts/tn10_sdk_gate.py --json
+```
+
+Serialization fix: [kaspa-python-sdk#78](https://github.com/kaspanet/kaspa-python-sdk/pull/78). Once merged and published, TN10 covenant broadcasts and proof fixtures can proceed; happy to link txids there.
+
+Item 1 (sighash utility) would also unblock cleaner SilverScript spend paths — still appreciated as a follow-on.

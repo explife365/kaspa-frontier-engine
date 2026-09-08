@@ -59,7 +59,7 @@ pub const DEV_DONATION_ADDRESS: &str =
 pub const TN10_GRPC: u16 = 16210;
 pub const TN10_WRPC_BORSH: u16 = 17210;
 pub const TN10_WRPC_JSON: u16 = 18210;
-/// host02 TN10 replica forwarded to loopback (see scripts/tn10_host02_tunnel.ps1).
+/// Second owned node wRPC forwarded to loopback (see scripts/tn10_host02_tunnel.ps1).
 pub const TN10_WRPC_REPLICA_JSON: u16 = 28210;
 pub const TN10_P2P: u16 = 16211;
 
@@ -67,7 +67,7 @@ pub fn loopback_wrpc_url(port: u16) -> String {
     format!("ws://127.0.0.1:{port}")
 }
 
-/// Default laptop + host02-tunnel replica URLs for N-of-M rehearsal.
+/// Default node 1 + node 2 loopback URLs for N-of-M rehearsal.
 pub fn default_dual_owned_node_urls() -> Vec<String> {
     vec![
         loopback_wrpc_url(TN10_WRPC_JSON),

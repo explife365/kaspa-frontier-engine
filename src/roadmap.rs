@@ -152,7 +152,7 @@ pub fn print_integrator_next() {
     println!(
         "  100 BPS is KIP-2 lore; scripts/bps100_cnf.py vs GHOSTDAG k=18. TARGET_BPS stays 10"
     );
-    println!("  host02 tuce/mamajama/flywheel/engos: off unless a new UNSAT needs native DRAT");
+    println!("  DRAT tooling: off unless a new UNSAT CNF lacks a verified proof");
     println!("  EVM work is Galleon L2 (wiKAS live); kaspad has no EVM — do not add one");
     println!("  CEX rehearsal: bounded multi-address ingestion + durable exact withdrawals + scheduled/dead-letter webhook outbox + atomic deduplicating receiver + delta-driven durable wRPC + subscribe-then-REST-scan (rusty-kaspa#939) + subscribe-ack journal replay applies to ledger on restart + ordered owned-node failover that will not subscribe to an unhealthy replica + shared N-of-M health gate (--dual, scripts/tn10_gate.ps1) on health/deposits/withdraw/outbox/receiver + mTLS required for non-loopback webhooks. Production still needs independently hosted nodes");
     println!("  SDK gate: python scripts/tn10_sdk_gate.py --json (covenant broadcast blocked until kaspa-python-sdk#78 merges + publishes)");
@@ -239,12 +239,12 @@ pub const COMMUNITY_ASKS: &[CommunityAsk] = &[
     CommunityAsk {
         ask: "Local kaspad TN10 IBD",
         status: AskStatus::Partial,
-        note: "owned kaspad 2.0.1 runs --utxoindex on the tn10 appdir; health fails closed on UTXO import (DAA 0), IBD peers, header/body gap, isolation, lag, and N-of-M. Laptop and host02 replica synced; --min-healthy 2 green when tunnel is up. host02 mamajama_runs purged (~449G freed). Toccata broadcast fail-closed until kaspa-python-sdk #78 wheel",
+        note: "owned kaspad 2.0.1 runs --utxoindex on the tn10 appdir; health fails closed on UTXO import (DAA 0), IBD peers, header/body gap, isolation, lag, and N-of-M. Node 1 and node 2 synced; --min-healthy 2 green when both loopback endpoints are up. Toccata broadcast fail-closed until kaspa-python-sdk #78 wheel",
     },
     CommunityAsk {
         ask: "KIP-2 SAT fragments",
         status: AskStatus::Partial,
-        note: "v2 re-solved locally; host02 kissat DRAT already verified. tuce/mamajama/flywheel/engos not needed unless a new UNSAT lacks DRAT. Not a KIP verdict",
+        note: "v2 re-solved locally; native kissat DRAT verified on reference CNFs. Extra grind tooling not needed unless a new UNSAT lacks DRAT. Not a KIP verdict",
     },
 ];
 

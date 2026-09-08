@@ -47,7 +47,7 @@ try {
         Add-Content -Path $outFile -Value "tn10-status exit code: $LASTEXITCODE"
     }
 
-    Write-Section "TN10 IBD watch (laptop + replica)"
+    Write-Section "TN10 IBD watch (node 1 + node 2)"
     & python "$root\scripts\tn10_ibd_watch.py" 2>&1 | Tee-Object -FilePath $outFile -Append
     $ibdExit = $LASTEXITCODE
     Add-Content -Path $outFile -Value "tn10_ibd_watch exit code: $ibdExit"

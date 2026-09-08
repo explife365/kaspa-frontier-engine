@@ -1,4 +1,4 @@
-# Fail-closed dual owned-node health gate (laptop + host02 replica).
+# Fail-closed dual owned-node health gate (node 1 + node 2).
 # Exit 0 only when --min-healthy 2 passes on 18210 + 28210.
 param(
     [switch]$Json
