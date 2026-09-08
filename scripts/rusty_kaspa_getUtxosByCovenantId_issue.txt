@@ -1,0 +1,49 @@
+### Summary
+
+Toccata covenants are live on mainnet and TN10. Integrators need UTXOs locked under a `covenant_id` without scanning all deposit addresses. kaspad exposes `getUtxosByAddresses` but not covenant-scoped lookup.
+
+Community indexers (e.g. [kascov](https://kascov.io/)) fill the gap today. A native RPC would help wallets, exchanges, and covenant apps use the node's UTXO set as source of truth.
+
+### Proposed RPC
+
+```json
+{
+  "method": "getUtxosByCovenantId",
+  "params": {
+    "covenantId": "<32-byte hex>",
+    "includeMempool": false
+  }
+}
+```
+
+Response shape mirrors `getUtxosByAddresses` entries. Return an error when `--utxoindex` is disabled — do not silently proxy third-party indexers from kaspad.
+
+### Semantics
+
+- Source of truth: node UTXO set with `--utxoindex` (same prerequisite as address lookup)
+- Optional mempool inclusion (default false for custody integrations)
+- Pagination (`limit` / cursor) for large covenant UTXO sets on TN10
+- Explicit `verified` semantics when the node cannot attest rows
+
+### Non-goals
+
+- Not a replacement for kascov lineage/history APIs
+- Not token metadata (KCC-0020 is separate)
+- Not a shortcut to skip `--utxoindex` on exchanges
+
+### Interim integrator path
+
+TN10 rehearsal shim + proof tooling (public, not kaspad):
+https://github.com/explife365/kaspa-frontier-engine
+
+- `tn10-covenant-rpc` — loopback shim over REST + kascov
+- `tn10-proof --kascov-only` — verify lineage when REST prunes historical txids
+- KIP outline: `scripts/getUtxosByCovenantId_kip_outline.md` in that repo
+
+### References
+
+- Toccata guide: output `covenant_id`, input `compute_budget`
+- Community indexer example: https://kascov.io/data/testnet-10/c/<id>.json
+- Related integrator thread: #1102
+
+Not a consensus change request from this reporter — feature request for Core review and possible KIP.

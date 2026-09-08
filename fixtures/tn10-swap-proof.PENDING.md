@@ -10,7 +10,7 @@ python examples/silverscript/restricted_swap.py --print-address
 python examples/silverscript/restricted_swap.py
 python examples/silverscript/restricted_swap.py --publish-fixture
 
-# capture fixtures/tn10-swap-rest.json + tn10-swap-kascov.json, then:
+cargo run --release --bin tn10-proof -- fixtures/tn10-swap-proof.json --capture-fixtures
 cargo run --release --bin tn10-proof -- fixtures/tn10-swap-proof.json --offline --json
 ```
 

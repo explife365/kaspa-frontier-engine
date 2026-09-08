@@ -16,8 +16,7 @@ python examples/silverscript/timelock_vault.py
 python examples/silverscript/timelock_vault.py --publish-fixture
 # copies .local/tn10-vault-proof.json -> fixtures/tn10-vault-proof.json
 
-# capture REST + kascov snapshots into fixtures/tn10-vault-rest.json and
-# fixtures/tn10-vault-kascov.json, then:
+cargo run --release --bin tn10-proof -- fixtures/tn10-vault-proof.json --capture-fixtures
 cargo run --release --bin tn10-proof -- fixtures/tn10-vault-proof.json --offline --json
 cargo run --release --bin tn10-proof -- fixtures/tn10-vault-proof.json --kascov-only --json
 ```

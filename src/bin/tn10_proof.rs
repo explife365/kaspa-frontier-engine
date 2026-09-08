@@ -1,7 +1,6 @@
 //! Verify a TN10 SilverScript covenant proof bundle (REST + kascov).
 
 use kaspa_frontier_engine::network::{self, KASCOV_TN10, TESTNET_10_REST};
-use kaspa_frontier_engine::proof::ProofApp;
 use kaspa_frontier_engine::{CovenantProof, KascovClient, Tn10RestClient};
 use std::env;
 use std::fs;
@@ -12,10 +11,11 @@ struct Options {
     json: bool,
     offline: bool,
     kascov_only: bool,
+    capture_fixtures: bool,
 }
 
 fn usage() -> &'static str {
-    "usage: tn10-proof [fixtures/tn10-counter-proof.json] [--json] [--offline] [--kascov-only]"
+    "usage: tn10-proof [fixtures/tn10-counter-proof.json] [--json] [--offline] [--kascov-only] [--capture-fixtures]"
 }
 
 fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, String> {
@@ -23,6 +23,7 @@ fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, St
     let mut json = false;
     let mut offline = false;
     let mut kascov_only = false;
+    let mut capture_fixtures = false;
     for argument in arguments {
         if argument == "--json" {
             json = true;
@@ -30,20 +31,26 @@ fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, St
             offline = true;
         } else if argument == "--kascov-only" {
             kascov_only = true;
+        } else if argument == "--capture-fixtures" {
+            capture_fixtures = true;
         } else if argument.starts_with('-') {
             return Err(format!("unknown flag {argument}"));
         } else {
             path = PathBuf::from(argument);
         }
     }
-    if offline && kascov_only {
-        return Err("--offline and --kascov-only are mutually exclusive".into());
+    if offline && kascov_only
+        || offline && capture_fixtures
+        || kascov_only && capture_fixtures
+    {
+        return Err("--offline, --kascov-only, and --capture-fixtures are mutually exclusive".into());
     }
     Ok(Options {
         path,
         json,
         offline,
         kascov_only,
+        capture_fixtures,
     })
 }
 
@@ -58,11 +65,7 @@ fn load_offline_snapshots(
     ),
     Box<dyn std::error::Error>,
 > {
-    let prefix = match proof.app_kind() {
-        ProofApp::TimelockVault => "tn10-vault",
-        ProofApp::RestrictedSwap => "tn10-swap",
-        ProofApp::Counter => "tn10-counter",
-    };
+    let prefix = proof.app_kind().fixture_prefix();
     let fixture_dir = proof_path
         .parent()
         .filter(|dir| dir.ends_with("fixtures"))
@@ -110,6 +113,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let proof = CovenantProof::from_path(&options.path)?;
+    if options.capture_fixtures {
+        let client = Tn10RestClient::new(TESTNET_10_REST)?;
+        let kascov = KascovClient::new(KASCOV_TN10)?;
+        let (rest_path, kascov_path) = proof
+            .capture_fixture_files(&options.path, &client, &kascov)
+            .await?;
+        if options.json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "rest": rest_path,
+                    "kascov": kascov_path,
+                }))?
+            );
+        } else {
+            println!("captured REST fixture  {}", rest_path.display());
+            println!("captured kascov fixture {}", kascov_path.display());
+        }
+        return Ok(());
+    }
     let report = if options.offline {
         let (txs, coin, kascov_url) = load_offline_snapshots(&proof, &options.path)?;
         proof.verify_offline_fixture(&txs, &coin, &kascov_url)?
@@ -188,7 +211,14 @@ mod tests {
     }
 
     #[test]
-    fn rejects_offline_and_kascov_only() {
+    fn rejects_conflicting_modes() {
         assert!(parse_args(["--offline".into(), "--kascov-only".into()]).is_err());
+        assert!(parse_args(["--capture-fixtures".into(), "--offline".into()]).is_err());
+    }
+
+    #[test]
+    fn parses_capture_fixtures_flag() {
+        let options = parse_args(["custom.json".into(), "--capture-fixtures".into()]).unwrap();
+        assert!(options.capture_fixtures);
     }
 }

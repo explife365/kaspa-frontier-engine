@@ -73,6 +73,7 @@ from tn10_rest import is_mature_utxo, virtual_daa  # noqa: E402
 
 LOCAL = ROOT / ".local"
 PROOF_PATH = LOCAL / "tn10-covenant-proof.json"
+FIXTURE_PROOF = ROOT / "fixtures" / "tn10-counter-proof.json"
 load_kaspa_env(ROOT)
 RPC_URL = (os.environ.get("KASPA_RPC_URL") or "").strip() or None
 
@@ -431,6 +432,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="ignore .local/tn10-covenant-proof.json and start from genesis",
     )
+    parser.add_argument(
+        "--publish-fixture",
+        action="store_true",
+        help="copy completed .local proof to fixtures/tn10-counter-proof.json",
+    )
     return parser.parse_args()
 
 
@@ -456,6 +462,9 @@ async def main() -> None:
         steps, changed = ensure_explorer_urls(steps)
         if changed:
             write_proof(steps, funding_text)
+        if args.publish_fixture:
+            FIXTURE_PROOF.write_text(PROOF_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+            print(f"published {FIXTURE_PROOF}")
         print("Proof already complete:")
         for step in steps:
             print(f"  {step.get('step')}  {step.get('explorer') or step.get('txid')}")
@@ -501,6 +510,9 @@ async def main() -> None:
 
         print(f"Final count = {counter.count}")
         print(f"Explorer: {EXPLORER}/txs/{counter.txid}")
+        if args.publish_fixture:
+            FIXTURE_PROOF.write_text(PROOF_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+            print(f"published {FIXTURE_PROOF}")
     finally:
         await client.disconnect()
 

@@ -97,6 +97,14 @@ impl ProofApp {
             ProofApp::RestrictedSwap => &[0, 1],
         }
     }
+
+    pub fn fixture_prefix(self) -> &'static str {
+        match self {
+            ProofApp::Counter => "tn10-counter",
+            ProofApp::TimelockVault => "tn10-vault",
+            ProofApp::RestrictedSwap => "tn10-swap",
+        }
+    }
 }
 
 pub const EXPECTED_STEPS: [&str; 3] = ["genesis", "add(5)", "subtract(3)"];
@@ -415,6 +423,50 @@ impl CovenantProof {
         let (coin, utxos) = kascov.snapshot(&covenant_id).await?;
         self.verify_kascov(&coin)?;
         Ok(self.build_report(covenant_id, step_reports, true, true, coin, utxos.len(), kascov))
+    }
+
+    /// Fetch live REST + kascov JSON for offline `--offline` replay after broadcast.
+    pub async fn capture_fixture_files(
+        &self,
+        proof_path: &Path,
+        rest: &Tn10RestClient,
+        kascov: &KascovClient,
+    ) -> Result<(std::path::PathBuf, std::path::PathBuf)> {
+        use std::path::PathBuf;
+        if !self.is_complete() {
+            return Err(EngineError::Message(format!(
+                "proof incomplete: {}/{} steps",
+                self.steps.len(),
+                self.expected_steps().len()
+            )));
+        }
+        let mut txs = Vec::with_capacity(self.steps.len());
+        for step in &self.steps {
+            let raw = rest.transaction(&step.txid).await?.ok_or_else(|| {
+                EngineError::Message(format!(
+                    "REST missing txid {} — wait for indexer or verify with --kascov-only",
+                    step.txid
+                ))
+            })?;
+            txs.push(raw);
+        }
+        let covenant_id = self.covenant_id()?;
+        let coin = kascov.coin(&covenant_id).await?;
+        let prefix = self.app_kind().fixture_prefix();
+        let fixture_dir = proof_path
+            .parent()
+            .filter(|dir| dir.ends_with("fixtures"))
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("fixtures"));
+        let rest_path = fixture_dir.join(format!("{prefix}-rest.json"));
+        let kascov_path = fixture_dir.join(format!("{prefix}-kascov.json"));
+        std::fs::write(&rest_path, serde_json::to_string_pretty(&txs)?).map_err(|error| {
+            EngineError::Message(format!("write {}: {error}", rest_path.display()))
+        })?;
+        std::fs::write(&kascov_path, serde_json::to_string_pretty(&coin)?).map_err(|error| {
+            EngineError::Message(format!("write {}: {error}", kascov_path.display()))
+        })?;
+        Ok((rest_path, kascov_path))
     }
 
     /// Live kascov verification when TN10 REST no longer serves historical txids.

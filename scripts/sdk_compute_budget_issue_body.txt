@@ -1,0 +1,48 @@
+### Summary
+
+Toccata is live. kaspad accepts v1 transactions with input `computeBudget`. The pinned/published Python `kaspa` package (2.0.2rc1) still drops that field on `TransactionInput.to_dict()`, so any submit path that round-trips through dict/JSON silently zeros the budget → covenant / SilverScript broadcasts fail with "script units exceeded."
+
+`from_dict` already honors `computeBudget`. The gap is only serialization in `TryToPyDict` for `TransactionInput`.
+
+### Repro
+
+```python
+from kaspa import Hash, TransactionInput, TransactionOutpoint
+
+ti = TransactionInput(
+    TransactionOutpoint(Hash("00" * 32), 0),
+    b"",
+    sequence=0,
+    sig_op_count=0,
+    compute_budget=10,
+)
+assert ti.compute_budget == 10
+d = ti.to_dict()
+assert "computeBudget" not in d  # omitted today
+```
+
+Integrator gate (public repo): https://github.com/explife365/kaspa-frontier-engine
+
+```bash
+python scripts/tn10_sdk_gate.py --json
+```
+
+### Fix
+
+Add to `impl TryToPyDict for TransactionInput`:
+
+```rust
+dict.set_item("computeBudget", self.get_compute_budget())?;
+```
+
+Add round-trip test: construct with `compute_budget=10`, `to_dict()`, assert key present, `from_dict` keeps 10.
+
+### Related
+
+- Fix PR: #78 (open, mergeable)
+- Not rusty-kaspa#1074 (WASM wallet generator — separate track)
+- TN10 integrator discussion: kaspanet/rusty-kaspa#1073
+
+Three SilverScript reference apps (counter, timelock vault, restricted swap) are ready to broadcast and publish proof fixtures once a **published wheel** includes this fix.
+
+Not a kaspad or consensus change.
