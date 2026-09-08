@@ -20,6 +20,20 @@ Copy-paste intro for Discord or GitHub discussions: [`scripts/kaspa_dev_share_po
 
 Not kaspad, not consensus, not an exchange listing path — TN10 rehearsal only.
 
+## While waiting for SDK PR #78 (published wheel)
+
+Pinned `kaspa==2.0.2rc1` drops `computeBudget` on serialize. Until PyPI ships the fix:
+
+| Script | Purpose |
+| --- | --- |
+| `python scripts/tn10_sdk_gate.py --json` | Native gate (fail-closed until wheel) |
+| `python scripts/tn10_sdk_wheel_watch.py --once` | Check PyPI + native gate |
+| `powershell -File scripts/tn10_prebroadcast_rehearsal.ps1` | Dry run: compile, proof verify, node gate |
+| `powershell -File scripts/tn10_dev_broadcast.ps1` | TN10 testnet only — dev patch + broadcast + fixtures |
+
+Dev patch (`TN10_SDK_DEV_PATCH=1`, `scripts/kaspa_sdk_dev_patch.py`): wraps `TransactionInput.to_dict()` for testnet rehearsal. Not production-ready. After a published wheel passes the native gate, use `tn10_fixture_publish_when_ready.ps1`.
+
+## What this is
 
 | Module | Role |
 | --- | --- |

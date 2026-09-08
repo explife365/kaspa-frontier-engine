@@ -1,0 +1,15 @@
+Friendly review request for PR #78 — unblocks TN10 SilverScript covenant broadcasts
+
+**Problem:** Pinned `kaspa` 2.0.2rc1 drops `computeBudget` on `TransactionInput.to_dict()`. Toccata v1 txs need that field; after RPC round-trip the effective budget is 0 → "script units exceeded" on TN10.
+
+**Fix scope:** One `dict.set_item("computeBudget", ...)` line + round-trip unit test. `from_dict` already accepts the key.
+
+**Integrator evidence (public, reproducible):**
+- Repo: https://github.com/explife365/kaspa-frontier-engine
+- Gate: `python scripts/tn10_sdk_gate.py --json` → `computeBudgetOk: false` today
+- Issue: #79 (duplicate tracking OK if closed in favor of this PR)
+- Three reference apps ready after merge + published wheel: counter, timelock vault, restricted swap
+
+**Not in scope:** rusty-kaspa#1074 (WASM generator). Not a kaspad change.
+
+If helpful, happy to post fresh gate JSON from additional environments on request. Thank you for maintaining the SDK.

@@ -43,8 +43,16 @@ LOCAL = ROOT / ".local"
 load_kaspa_env(ROOT)
 RPC_URL = (os.environ.get("KASPA_RPC_URL") or "").strip() or None
 
+from kaspa_sdk_dev_patch import (  # noqa: E402
+    dev_patch_enabled,
+    ensure_dev_patch_if_enabled,
+)
+
+ensure_dev_patch_if_enabled()
+
 
 def require_toccata_sdk() -> None:
+    ensure_dev_patch_if_enabled()
     probe = TransactionInput(
         TransactionOutpoint(Hash("00" * 32), 0),
         b"",
@@ -54,10 +62,17 @@ def require_toccata_sdk() -> None:
     )
     encoded = probe.to_dict()
     if encoded.get("computeBudget") != COMPUTE_BUDGET:
+        dev_hint = (
+            " Set TN10_SDK_DEV_PATCH=1 for TN10 testnet rehearsal only "
+            "(see scripts/kaspa_sdk_dev_patch.py) until PR #78 publishes."
+            if not dev_patch_enabled()
+            else ""
+        )
         raise RuntimeError(
             "installed kaspa-python-sdk drops computeBudget during serialization; "
             "refusing to fund or broadcast a broken Toccata v1 transaction. "
             "Use a published wheel that includes kaspa-python-sdk#78, then rerun."
+            + dev_hint
         )
 
 

@@ -69,12 +69,14 @@ FLOW = ("genesis", "add(5)", "subtract(3)")
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 from kaspa_env import load_kaspa_env, upsert_kaspa_env  # noqa: E402
+from kaspa_sdk_dev_patch import ensure_dev_patch_if_enabled  # noqa: E402
 from tn10_rest import is_mature_utxo, virtual_daa  # noqa: E402
 
 LOCAL = ROOT / ".local"
 PROOF_PATH = LOCAL / "tn10-covenant-proof.json"
 FIXTURE_PROOF = ROOT / "fixtures" / "tn10-counter-proof.json"
 load_kaspa_env(ROOT)
+ensure_dev_patch_if_enabled()
 RPC_URL = (os.environ.get("KASPA_RPC_URL") or "").strip() or None
 
 SOURCE = """
@@ -99,6 +101,7 @@ contract Counter(int init_count) {
 
 def require_toccata_sdk() -> None:
     """Fail before funding/broadcast if the SDK drops v1 computeBudget."""
+    ensure_dev_patch_if_enabled()
     probe = TransactionInput(
         TransactionOutpoint(Hash("00" * 32), 0),
         b"",
