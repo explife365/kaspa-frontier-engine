@@ -67,7 +67,7 @@ Publish on kaspa.org and link here:
 
 Third-party TN10 integrator rehearsal (deposits/withdrawals DAA, N-of-M node health gate) — reproducible logs available on request. Does not substitute for core node audit.
 
-Full plan: `scripts/certik_score_plan.md` in kaspa-frontier-engine integrator repo.
+Full plan: [`scripts/certik_score_plan.md`](https://github.com/explife365/kaspa-frontier-engine/blob/main/scripts/certik_score_plan.md) in [kaspa-frontier-engine](https://github.com/explife365/kaspa-frontier-engine) (public integrator repo). Evidence runner: `scripts/integrator_evidence_pack.ps1`.
 
 ---
 
