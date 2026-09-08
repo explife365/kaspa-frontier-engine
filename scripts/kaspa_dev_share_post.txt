@@ -1,29 +1,25 @@
-TN10 integrator rehearsal crate (public) — not kaspad, not consensus
+TN10 integrator rehearsal — public repo for Core, SDK, and exchange teams
 
-Repo: https://github.com/explife365/kaspa-frontier-engine
+https://github.com/explife365/kaspa-frontier-engine
 
-What ships today on testnet-10:
-- N-of-M owned-node health gate (two operationally independent TN10 nodes)
-- Durable deposits / withdrawals with DAA confirmation + SQLite restart safety
-- wRPC live ingestion + subscribe-ack journal replay (rusty-kaspa#939 pattern)
-- Bounded tn10-covenant-rpc shim (REST + kascov; not kaspad getUtxosByCovenantId)
-- tn10-proof: counter / timelock vault / restricted swap proof bundles
-- Evidence pack: scripts/integrator_evidence_pack.ps1
+Toccata is live on testnet-10. This crate rehearses what integrators need next: owned-node health, DAA-confirmed deposits and withdrawals, durable wRPC ingestion, and covenant proof bundles.
 
-Blocked on kaspa-python-sdk#78 (computeBudget dropped on TransactionInput.to_dict):
-- SilverScript covenant broadcast fail-closed until a published wheel includes the fix
-- Repro + gate: python scripts/tn10_sdk_gate.py --json
-- PR comment context: scripts/sdk_pr78_comment.md
+What is working today on TN10:
+- N-of-M owned-node health gate (node 1 + node 2, fail-closed until 2/2 green)
+- SQLite-backed deposits, withdrawals, and webhook outbox with idempotency keys
+- wRPC live ingestion with subscribe-ack journal replay (rusty-kaspa#939 pattern)
+- tn10-proof for counter, timelock vault, and restricted swap lineage checks
+- Bounded tn10-covenant-rpc shim while getUtxosByCovenantId is not on kaspad
 
-Not claimed:
-- Not a rusty-kaspa consensus patch
-- Not DAGKnight / 100 BPS activation
-- Not Circle USDC or Uniswap on L1
-
-Useful for Core/SDK/wallet teams:
-- Reference covenant apps under examples/silverscript/
-- KIP path for getUtxosByCovenantId until kaspad exposes it
-- Integrator evidence for exchange rehearsal (see scripts/certik_score_plan.md)
-
-Rehearsal entrypoint:
+One command rehearsal:
   powershell -File scripts/tn10_rehearsal.ps1 -Covenant
+
+Next unlock for public covenant txids: kaspa-python-sdk#78 (computeBudget in TransactionInput.to_dict). Three SilverScript reference apps are ready; repro gate:
+  python scripts/tn10_sdk_gate.py --json
+
+Helpful reviews: PR #78 on kaspa-python-sdk, rusty-kaspa#1073 and #1102 for integrator context.
+
+Not in scope: consensus patches, DAGKnight activation, or L1 EVM/stables.
+
+CEX checklist: scripts/cex_production_runbook.md
+getUtxosByCovenantId KIP outline: scripts/getUtxosByCovenantId_kip_outline.md

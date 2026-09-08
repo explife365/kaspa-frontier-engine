@@ -1,0 +1,31 @@
+Kaspa Skynet score vs developer momentum — what actually moves each
+
+CertiK Skynet (~84.6 for Kaspa vs ~97.5 for Bitcoin, Sep 2026) is mainly a **ratings-aggregator telemetry** page. It weights **Community Trust at 45%** for Kaspa (vs 5% for Bitcoin). Visible gaps today: Twitter listed N/A, GitHub org not linked (shows 0 stars), token launch metadata missing, Skynet Monitor not activated.
+
+**What a Skynet "Get Connected" post does:**
+- Helps listing desks and risk teams who read CertiK dashboards
+- Can lift Fundamental Health and Community Trust buckets after Foundation links official GitHub, X, and launch metadata
+- Realistic near-term lift: roughly +3–6 points with Phase 0 hygiene (see scripts/certik_score_plan.md)
+
+**What it does not do:**
+- Does not notify Discord or GitHub developers
+- Does not merge kaspa-python-sdk#78 or ship wallet covenant decode
+- Does not replace public TN10 txids, integrator tests, or Core review
+
+Kaspa Code Security sub-score is already strong (~92). The social gap on Skynet is **linkage and maturity metadata**, not "L1 code is broken."
+
+**How the community can help (positive, evidence-based):**
+1. **GitHub:** review and test kaspa-python-sdk#78; star and watch kaspanet/rusty-kaspa, silverscript, kaspa-python-sdk
+2. **Integrator demos:** run TN10 rehearsal and share command output (repo above) — deposits, N-of-M gate, covenant proofs
+3. **Wallets/explorers:** Toccata v1 decode and covenant UX (consensus already accepts the txs)
+4. **Node operators:** synced TN10 nodes with --utxoindex for integrator testing
+
+**Foundation-owned (cannot be fixed by integrator posts):**
+- Skynet official account linkage, team verification, Monitor activation
+- SECURITY.md + disclosure process on kaspa.org
+- rusty-kaspa consensus audit commission (largest honest Code Security narrative gap)
+
+Skynet hygiene is worth doing **for Foundation ops and listings**. Waking builder momentum stays on **GitHub + TN10 reproducible work**. Both tracks are complementary, not substitutes.
+
+Integrator evidence pack: powershell -File scripts/integrator_evidence_pack.ps1
+Public repo: https://github.com/explife365/kaspa-frontier-engine

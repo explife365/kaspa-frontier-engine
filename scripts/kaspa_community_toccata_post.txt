@@ -1,0 +1,29 @@
+Toccata integrator path on TN10 — almost there
+
+Toccata v1 is live on kaspad (mass, compute_budget, covenant_id). TN10 has heavy covenant activity. The remaining integrator gap is mostly **SDK serialization**, not node consensus.
+
+**Current state:**
+- kaspad accepts v1 txs with computeBudget
+- Pinned kaspa 2.0.2rc1 drops computeBudget on TransactionInput.to_dict() → effective budget 0 after RPC round-trip
+- Fix is one line in kaspa-python-sdk convert.rs — PR #78 is open and mergeable
+
+**What is ready to ship after a published wheel:**
+- counter.py — increment covenant
+- timelock_vault.py — genesis → DAA wait → release
+- restricted_swap.py — fixed-recipient swap
+- tn10-proof bundles with public explorer txids
+
+Repro anyone can run:
+  python scripts/tn10_sdk_gate.py --json
+
+Public integrator repo (tests, gate, reference apps):
+  https://github.com/explife365/kaspa-frontier-engine
+
+**How to help today:**
+- Review kaspa-python-sdk#78 (serialization + round-trip test)
+- Run the gate on your environment and post JSON output on the PR
+- Wallet teams: covenant decode UX still lags chain data — explorers like kascov help
+
+Until #78 publishes, broadcasts stay fail-closed by design — not a kaspad bug.
+
+Related: rusty-kaspa#1073 (script units exceeded symptom), #1102 (broader integrator notes).

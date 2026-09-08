@@ -1,5 +1,10 @@
 # Skynet “Get Connected” submission draft — Kaspa Foundation
 
+**Foundation ops only.** This does not post to Discord or wake GitHub developers.
+For community-facing copy use `scripts/kaspa_community_social_gap_post.txt` and
+`scripts/kaspa_community_toccata_post.txt`. Skynet fixes aggregator metadata;
+builder momentum stays on TN10 reproducible work and SDK PR reviews.
+
 Copy-paste for [skynet.certik.com/projects/kaspa](https://skynet.certik.com/projects/kaspa) → **Get Connected** / **Missing info? Submit now**.
 
 Independent integrator field notes. Not a KIP. Not consensus authority.
