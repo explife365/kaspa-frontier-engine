@@ -110,7 +110,7 @@ def require_toccata_sdk() -> None:
         raise RuntimeError(
             "installed kaspa-python-sdk drops computeBudget during serialization; "
             "refusing to fund or broadcast a broken Toccata v1 transaction. "
-            "Use a build containing rusty-kaspa PR #1074, then rerun."
+            "Use a published wheel that includes kaspa-python-sdk#78, then rerun."
         )
 
 

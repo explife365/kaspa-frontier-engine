@@ -1,7 +1,8 @@
 use kaspa_frontier_engine::network::{
     self, is_testnet_address, tn10_tx_url, COINBASE_MATURITY_DAA, TN10_EXPLORER,
 };
-use kaspa_frontier_engine::{DepositLedger, DepositWatch, Tn10RestClient};
+use kaspa_frontier_engine::{DepositLedger, DepositWatch, OwnedNodeGateOptions, Tn10RestClient};
+use kaspa_frontier_engine::{finish_gate_options, run_owned_node_gate, try_parse_gate_flag, print_gate_preflight};
 use std::collections::HashSet;
 use std::env;
 use std::fs;
@@ -50,8 +51,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut address = None;
     let mut ledger = PathBuf::from(".local/tn10-deposits.sqlite");
     let mut import_text: Option<PathBuf> = None;
+    let mut gate = OwnedNodeGateOptions::default();
+    let mut dual = false;
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
+        if try_parse_gate_flag(&mut gate, &mut dual, &arg, &mut args)
+            .map_err(|error| format!("{error}\nusage: tn10-deposits <kaspatest:address> [--ledger PATH] [--import-text PATH] [--dual] [--min-healthy N] [--require-healthy N] [--max-daa-lag N]"))?
+        {
+            continue;
+        }
         if arg == "--ledger" {
             ledger = PathBuf::from(args.next().ok_or("--ledger needs a path")?);
         } else if arg == "--import-text" {
@@ -64,8 +72,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             address = Some(arg);
         }
     }
+    let gate = finish_gate_options(gate, dual)
+        .map_err(|error| format!("{error}\nusage: tn10-deposits <kaspatest:address> [--ledger PATH] [--import-text PATH] [--dual] [--min-healthy N]"))?;
     let address = address
-        .ok_or("usage: tn10-deposits <kaspatest:address> [--ledger PATH] [--import-text PATH]")?;
+        .ok_or("usage: tn10-deposits <kaspatest:address> [--ledger PATH] [--import-text PATH] [--dual] [--min-healthy N] [--require-healthy N] [--max-daa-lag N]")?;
     if !is_testnet_address(&address) {
         return Err(format!("TN10 watcher refuses non-testnet address: {address}").into());
     }
@@ -81,6 +91,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let client = Tn10RestClient::new(network::TESTNET_10_REST)?;
+    if gate.min_healthy > 0 {
+        let summary =
+            run_owned_node_gate(&gate.urls, &client, gate.max_daa_lag, gate.min_healthy).await?;
+        print_gate_preflight(&summary);
+    }
     let mut watch = DepositWatch::new(network::DEFAULT_DEPOSIT_CONFIRMATIONS);
     if let Some(parent) = ledger.parent() {
         if !parent.as_os_str().is_empty() {

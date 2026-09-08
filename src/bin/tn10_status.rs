@@ -1,7 +1,9 @@
-use kaspa_frontier_engine::l2::{probe_igra_galleon, probe_kasplex_l2};
+use kaspa_frontier_engine::l2::{probe_igra_galleon, probe_igra_mainnet, probe_kasplex_l2};
 use kaspa_frontier_engine::roadmap;
+use kaspa_frontier_engine::network;
 use kaspa_frontier_engine::{
-    assess_owned_node, network, probe_owned_node, GhostdagTelemetry, KasplexClient, Tn10RestClient,
+    EngineError, probe_owned_node, report_from_probe, summarize_gate, GhostdagTelemetry,
+    KasplexClient, Tn10RestClient, GATE_DEFAULT_MAX_DAA_LAG,
 };
 
 #[tokio::main]
@@ -35,15 +37,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let rpc = kaspa_frontier_engine::l2::EvmRpcClient::new(network::IGRA_GALLEON_RPC)?;
         rpc.galleon_test_usdc_meta().await
     };
-    let owned_url = format!("ws://127.0.0.1:{}", network::TN10_WRPC_JSON);
-    let (snap, krc, page, igra, kasplex_l2, usdc, owned) = tokio::join!(
+    let hyperlane_usdc_meta = async {
+        let rpc = kaspa_frontier_engine::l2::EvmRpcClient::new(network::IGRA_MAINNET_RPC)?;
+        rpc.igra_hyperlane_usdc_meta().await
+    };
+    let owned_urls = network::default_dual_owned_node_urls();
+    let (snap, krc, page, igra, igra_main, kasplex_l2, usdc, hyp_usdc, owned_laptop, owned_replica) =
+        tokio::join!(
         client.status_snapshot(),
         kasplex.info(),
         kasplex.tokenlist(None),
         probe_igra_galleon(),
+        probe_igra_mainnet(),
         probe_kasplex_l2(),
         usdc_meta,
-        probe_owned_node(&owned_url)
+        hyperlane_usdc_meta,
+        probe_owned_node(&owned_urls[0]),
+        probe_owned_node(&owned_urls[1])
     );
     let snap = snap?;
     let dag = snap.dag;
@@ -56,17 +66,76 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("network            {}", telemetry.network);
     println!("protocol           {}", telemetry.protocol);
     println!("virtual DAA        {}", telemetry.virtual_daa_score);
-    match owned.and_then(|health| {
-        assess_owned_node(&health, telemetry.virtual_daa_score, 100)
-            .map(|assessment| (health, assessment))
-    }) {
-        Ok((health, assessment)) => println!(
-            "owned kaspad       {} synced, utxoindex, lag={} DAA  v{}",
-            health.server.network_id, assessment.behind_public_daa, health.server.server_version
-        ),
-        Err(error) => println!("owned kaspad       unavailable/unhealthy ({error})"),
+    let gate_required = 2usize.min(owned_urls.len());
+    let reports = owned_urls
+        .iter()
+        .zip([&owned_laptop, &owned_replica])
+        .map(|(url, probe)| match probe {
+            Ok(health) => report_from_probe(
+                url,
+                Ok(health.clone()),
+                telemetry.virtual_daa_score,
+                GATE_DEFAULT_MAX_DAA_LAG,
+            ),
+            Err(error) => report_from_probe(
+                url,
+                Err(EngineError::Message(error.to_string())),
+                telemetry.virtual_daa_score,
+                GATE_DEFAULT_MAX_DAA_LAG,
+            ),
+        })
+        .collect();
+    let summary = summarize_gate(
+        reports,
+        &owned_urls,
+        telemetry.virtual_daa_score,
+        GATE_DEFAULT_MAX_DAA_LAG,
+        gate_required,
+    );
+    let healthy_count = summary.healthy_nodes;
+    let gate_label = if summary.gate_healthy {
+        "green"
+    } else {
+        "red"
+    };
+    println!(
+        "owned gate         {}/{} required ({})  nodes {}/{} healthy  ({} + {})",
+        summary.healthy_nodes,
+        gate_required,
+        gate_label,
+        healthy_count,
+        owned_urls.len(),
+        network::TN10_WRPC_JSON,
+        network::TN10_WRPC_REPLICA_JSON
+    );
+    for report in &summary.reports {
+        let detail = if report.healthy {
+            report
+                .assessment
+                .as_ref()
+                .map(|assessment| format!("lag={} DAA", assessment.behind_public_daa))
+                .unwrap_or_else(|| "healthy".into())
+        } else {
+            report.error.clone().unwrap_or_else(|| "unhealthy".into())
+        };
+        let version = report
+            .health
+            .as_ref()
+            .map(|health| health.server.server_version.clone())
+            .unwrap_or_else(|| "?".into());
+        println!(
+            "  {} {} v{} [{}] ({})",
+            report.url,
+            if report.healthy { "healthy" } else { "unhealthy" },
+            version,
+            report.stage_label,
+            detail
+        );
     }
-    println!("blocks             {}", telemetry.block_count);
+    println!(
+        "bodies / headers   {} / {}  (explorer blockCount is pruned; use virtual DAA)",
+        telemetry.block_count, telemetry.header_count
+    );
     println!("difficulty         {:.4}", telemetry.difficulty);
     println!(
         "est. hashrate      {:.4} H/s  (difficulty × {} BPS, not pool data)",
@@ -141,6 +210,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(err) => println!("KRC-20 tokenlist   unavailable ({err})"),
     }
     print_l2("Igra Galleon L2   ", igra);
+    print_l2("Igra Mainnet L2   ", igra_main);
     print_l2("Kasplex L2        ", kasplex_l2);
     match usdc {
         Ok(meta) => println!(
@@ -148,6 +218,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             meta.symbol, meta.address, meta.decimals, meta.name
         ),
         Err(err) => println!("Galleon ERC-20     USDC eth_call failed ({err})"),
+    }
+    match hyp_usdc {
+        Ok(meta) => println!(
+            "Igra Hyperlane     {} {} decimals={}  {}  (bridged HypSynthetic, not Circle mint)",
+            meta.symbol, meta.address, meta.decimals, meta.name
+        ),
+        Err(err) => println!("Igra Hyperlane     USDC eth_call failed ({err})"),
     }
     println!("sink               {}", telemetry.sink);
     println!("pruning point      {}", dag.pruning_point_hash);

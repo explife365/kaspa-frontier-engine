@@ -13,12 +13,15 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from galleon import (  # noqa: E402
     CIRCLE_USDC_ETHEREUM,
     CIRCLE_USDC_ON_GALLEON,
+    CIRCLE_USDC_ON_IGRA_MAINNET,
     GALLEON_CHAIN_ID,
     GALLEON_GTEST,
     GALLEON_MIN_GAS_WEI,
     GALLEON_RELAY_GAS_WEI,
     GALLEON_TEST_USDC,
     GALLEON_WRAPPED_IKAS,
+    IGRA_MAINNET_CHAIN_ID,
+    IGRA_MAINNET_HYPERLANE_USDC,
     NATIVE_TRANSFER_GAS,
     circle_usdc_on_chain,
     is_circle_usdc,
@@ -65,6 +68,12 @@ class CircleUsdcTests(unittest.TestCase):
         )
         self.assertTrue(is_circle_usdc(1, CIRCLE_USDC_ETHEREUM))
         self.assertFalse(is_circle_usdc(1, GALLEON_TEST_USDC))
+        self.assertIsNone(CIRCLE_USDC_ON_IGRA_MAINNET)
+        self.assertIsNone(circle_usdc_on_chain(IGRA_MAINNET_CHAIN_ID))
+        self.assertFalse(is_circle_usdc(IGRA_MAINNET_CHAIN_ID, IGRA_MAINNET_HYPERLANE_USDC))
+        self.assertNotEqual(
+            IGRA_MAINNET_HYPERLANE_USDC.lower(), CIRCLE_USDC_ETHEREUM.lower()
+        )
 
 
 class EntryPayloadTests(unittest.TestCase):

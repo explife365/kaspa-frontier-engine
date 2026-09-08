@@ -73,7 +73,7 @@ pub const L1_GAPS: &[L1Gap] = &[
     L1Gap {
         ask: "Circle USDC",
         why_not_l1: "issuer product; L1 cannot host ERC-20",
-        belongs: "Circle + Igra/Kasplex production (Galleon has test USDC only)",
+        belongs: "Circle + Igra/Kasplex production (Galleon test USDC and Igra Hyperlane USDC are not Circle)",
     },
     L1Gap {
         ask: "getUtxosByCovenantId",
@@ -143,6 +143,10 @@ pub fn print_integrator_next() {
         println!("  wiKAS is live on Galleon {wikas}; not kaspad; not USD");
     }
     println!("  Use Igra Galleon test USDC; do not deploy a USDC lookalike");
+    println!(
+        "  Igra mainnet Hyperlane USDC {} is bridged HypSynthetic, not Circle",
+        crate::network::IGRA_MAINNET_HYPERLANE_USDC
+    );
     println!("  Test gas: respect Igra faucet limits; do not automate IP rotation or multi-account bypasses");
     println!("  L1 testnet is TN10 only; do not IBD TN12. Rothschild -t is TPS (tx/s), not BPS");
     println!(
@@ -150,7 +154,9 @@ pub fn print_integrator_next() {
     );
     println!("  host02 tuce/mamajama/flywheel/engos: off unless a new UNSAT needs native DRAT");
     println!("  EVM work is Galleon L2 (wiKAS live); kaspad has no EVM — do not add one");
-    println!("  CEX rehearsal: bounded multi-address ingestion + durable exact withdrawals + scheduled/dead-letter webhook outbox + atomic deduplicating receiver + delta-driven durable wRPC + ordered owned-node failover/resnapshots + N-of-M supervisor health gate. Production still needs independently hosted nodes and authenticated TLS deployment");
+    println!("  CEX rehearsal: bounded multi-address ingestion + durable exact withdrawals + scheduled/dead-letter webhook outbox + atomic deduplicating receiver + delta-driven durable wRPC + subscribe-then-REST-scan (rusty-kaspa#939) + subscribe-ack journal replay applies to ledger on restart + ordered owned-node failover that will not subscribe to an unhealthy replica + shared N-of-M health gate (--dual, scripts/tn10_gate.ps1) on health/deposits/withdraw/outbox/receiver + mTLS required for non-loopback webhooks. Production still needs independently hosted nodes");
+    println!("  SDK gate: python scripts/tn10_sdk_gate.py --json (covenant broadcast blocked until kaspa-python-sdk#78 merges + publishes)");
+    println!("  CertiK Skynet gap (~84.6 vs BTC ~97.5) is Foundation telemetry/ops — see scripts/certik_score_plan.md; maps to COMMUNITY_ASKS, not KIP-2 or BPS lore");
 }
 
 /// Integrator asks this crate can ship, park on L2, or refuse.
@@ -188,7 +194,7 @@ pub const COMMUNITY_ASKS: &[CommunityAsk] = &[
     CommunityAsk {
         ask: "getUtxosByCovenantId",
         status: AskStatus::Partial,
-        note: "kascov covenant documents with typed embedded UTXOs + bounded tn10-covenant-rpc shim; community data is schema-validated but remains non-consensus evidence. still not kaspad",
+        note: "kascov covenant documents with typed embedded UTXOs + bounded tn10-covenant-rpc shim + tn10-proof REST/kascov/--kascov-only verification; reference apps counter + timelock_vault + restricted_swap (broadcast blocked until SDK #78); scripts/tn10_covenant_rehearsal.ps1 + tn10_covenant_rpc_smoke.ps1. still not kaspad",
     },
     CommunityAsk {
         ask: "Kasplex KRC-20 mint/transfer",
@@ -203,7 +209,7 @@ pub const COMMUNITY_ASKS: &[CommunityAsk] = &[
     CommunityAsk {
         ask: "Circle USDC / Uniswap on L1",
         status: AskStatus::OnL2,
-        note: "Galleon test USDC 0xFd89…667A via JSON-RPC batch eth_call; Circle has no Galleon listing; L1 has no EVM",
+        note: "Galleon test USDC 0xFd89…667A via JSON-RPC batch eth_call; Igra mainnet Hyperlane USDC 0xA5b8…735E7 is bridged, not Circle; L1 has no EVM",
     },
     CommunityAsk {
         ask: "DAGKnight / 100 BPS lore",
@@ -223,7 +229,7 @@ pub const COMMUNITY_ASKS: &[CommunityAsk] = &[
     CommunityAsk {
         ask: "CEX plug-and-play REST wrapper",
         status: AskStatus::Partial,
-        note: "rehearsal only: bounded multi-address snapshots/ingestion, durable exact withdrawals, scheduled/dead-letter webhook outbox, atomic deduplicating receiver inbox, delta-driven durable wRPC replay, ordered owned-node failover/resnapshots, and an N-of-M supervisor health gate. Production requires independently hosted nodes and authenticated TLS deployment",
+        note: "rehearsal only: bounded multi-address snapshots/ingestion, durable exact withdrawals, scheduled/dead-letter webhook outbox, atomic deduplicating receiver inbox, delta-driven durable wRPC replay, subscribe-then-REST-scan (rusty-kaspa#939), ordered owned-node failover that will not subscribe to an unhealthy replica, N-of-M supervisor health gate, and mTLS required for non-loopback webhook delivery. Production still needs independently hosted nodes",
     },
     CommunityAsk {
         ask: "Kasplex tokenlist pagination",
@@ -232,8 +238,8 @@ pub const COMMUNITY_ASKS: &[CommunityAsk] = &[
     },
     CommunityAsk {
         ask: "Local kaspad TN10 IBD",
-        status: AskStatus::Shipped,
-        note: "owned kaspad 2.0.1 is synced with --utxoindex; tn10-node-health fails closed on network, version, sync, index, response consistency, public-DAA lag, or N-of-M redundancy; tn10-wrpc-live fails over to the healthiest remaining loopback replica",
+        status: AskStatus::Partial,
+        note: "owned kaspad 2.0.1 runs --utxoindex on the tn10 appdir; health fails closed on UTXO import (DAA 0), IBD peers, header/body gap, isolation, lag, and N-of-M. Laptop and host02 replica synced; --min-healthy 2 green when tunnel is up. host02 mamajama_runs purged (~449G freed). Toccata broadcast fail-closed until kaspa-python-sdk #78 wheel",
     },
     CommunityAsk {
         ask: "KIP-2 SAT fragments",

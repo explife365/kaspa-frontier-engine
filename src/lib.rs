@@ -26,6 +26,7 @@ pub mod mtls;
 pub mod network;
 pub mod outbox_receiver;
 pub mod owned_node;
+pub mod owned_node_gate;
 pub mod proof;
 pub mod rest;
 pub mod roadmap;
@@ -60,16 +61,28 @@ pub use krc20::{
     kasplex_transfer_inscription, Krc20Error, Krc20StateEngine,
 };
 pub use l2::{EvmChainProbe, EvmRpcClient};
-pub use network::AddressNetwork;
+pub use network::{
+    default_dual_owned_node_urls, loopback_wrpc_url, AddressNetwork, TN10_WRPC_JSON,
+    TN10_WRPC_REPLICA_JSON,
+};
 pub use outbox_receiver::{
     DeliveryEnvelope, InboxOutcome, IncomingLedgerEvent, OutboxReceiverStore,
 };
 pub use owned_node::{
-    assess_owned_node, choose_failover_index, next_failover_index, probe_owned_node,
-    require_loopback_wrpc_url, select_primary, validate_owned_node_urls, OwnedNodeAssessment,
-    OwnedNodeHealth, MAX_OWNED_NODE_URLS,
+    assess_owned_node, choose_failover_index, next_failover_index, owned_node_stage,
+    owned_node_stage_label, probe_owned_node, require_loopback_wrpc_url, select_primary,
+    validate_owned_node_urls, OwnedNodeAssessment, OwnedNodeHealth, MAX_OWNED_NODE_URLS,
 };
-pub use proof::{CovenantProof, CovenantProofStep};
+pub use owned_node_gate::{
+    apply_gate_env_defaults, evaluate_owned_node_gate, finish_gate_options, gate_summary_to_json,
+    parse_owned_node_urls_from_env, print_gate_preflight, report_from_probe, run_owned_node_gate, summarize_gate,
+    try_parse_gate_flag, validate_gate_options, OwnedNodeGateOptions, OwnedNodeGateReport,
+    OwnedNodeGateSummary, DEFAULT_MAX_DAA_LAG as GATE_DEFAULT_MAX_DAA_LAG,
+};
+pub use proof::{
+    CovenantProof, CovenantProofStep, KascovProofSummary, ProofStepReport,
+    ProofVerificationReport,
+};
 pub use rest::{
     AddressBalance, AddressUtxo, BlockDagInfo, FeeEstimate, HashrateInfo, StatusSnapshot,
     Tn10RestClient, ToccataTx,
@@ -84,9 +97,11 @@ pub use watch::{
 };
 pub use withdrawal_ledger::{WithdrawalLedger, WithdrawalRecord, WithdrawalState};
 pub use wrpc::{
-    decode_block_dag_info_response, decode_notification, decode_server_info_response,
-    encode_get_block_dag_info, encode_get_server_info, encode_notify_utxos_changed,
-    encode_notify_virtual_daa_score_changed, replay_into_ledger, replay_into_ledger_addresses,
-    validate_subscription_ack, WrpcBlockDagInfo, WrpcDepositProjection, WrpcDepositSnapshot,
-    WrpcFrame, WrpcJournal, WrpcNotification, WrpcReplayReport, WrpcServerInfo,
+    apply_pending_journal_frames, decode_block_dag_info_response,
+    decode_connected_peer_info_response, decode_notification, decode_server_info_response,
+    encode_get_block_dag_info, encode_get_connected_peer_info, encode_get_server_info,
+    encode_notify_utxos_changed, encode_notify_virtual_daa_score_changed, replay_into_ledger,
+    replay_into_ledger_addresses, validate_subscription_ack, WrpcBlockDagInfo,
+    WrpcDepositProjection, WrpcDepositSnapshot, WrpcFrame, WrpcJournal, WrpcNotification,
+    WrpcReplayReport, WrpcServerInfo,
 };

@@ -6,7 +6,8 @@
 use crate::error::{EngineError, Result};
 use crate::kascov::KascovClient;
 use crate::network::{
-    CIRCLE_USDC_ON_GALLEON, GALLEON_GTEST, GALLEON_TEST_USDC, IGRA_GALLEON_CHAIN_ID, KASCOV_TN10,
+    CIRCLE_USDC_ON_GALLEON, CIRCLE_USDC_ON_IGRA_MAINNET, GALLEON_GTEST, GALLEON_TEST_USDC,
+    IGRA_GALLEON_CHAIN_ID, IGRA_MAINNET_CHAIN_ID, IGRA_MAINNET_HYPERLANE_USDC, KASCOV_TN10,
     TESTNET_10_REST, TN10_INTEGRATOR_RPC,
 };
 use crate::rest::{AddressUtxo, BlockDagInfo, Tn10RestClient};
@@ -106,8 +107,12 @@ pub fn info_result() -> Value {
         "galleonTestUsdc": GALLEON_TEST_USDC,
         "galleonGtest": GALLEON_GTEST,
         "circleUsdcOnGalleon": CIRCLE_USDC_ON_GALLEON,
-        "circleUsdcEthereum": crate::circle::CIRCLE_USDC_ETHEREUM,
         "circleListsGalleon": false,
+        "igraMainnetChainId": IGRA_MAINNET_CHAIN_ID,
+        "igraMainnetHyperlaneUsdc": IGRA_MAINNET_HYPERLANE_USDC,
+        "circleUsdcOnIgraMainnet": CIRCLE_USDC_ON_IGRA_MAINNET,
+        "circleListsIgraMainnet": false,
+        "circleUsdcEthereum": crate::circle::CIRCLE_USDC_ETHEREUM,
         "notKaspad": true,
         "methods": [
             "getInfo",
@@ -338,9 +343,12 @@ mod tests {
         assert_eq!(v["notKaspad"], true);
         assert!(v["circleUsdcOnGalleon"].is_null());
         assert_eq!(v["circleListsGalleon"], false);
+        assert!(v["circleUsdcOnIgraMainnet"].is_null());
+        assert_eq!(v["circleListsIgraMainnet"], false);
         assert_eq!(v["circleUsdcEthereum"], crate::circle::CIRCLE_USDC_ETHEREUM);
         assert_eq!(v["galleonTestUsdc"], GALLEON_TEST_USDC);
         assert_eq!(v["galleonGtest"], GALLEON_GTEST);
+        assert_eq!(v["igraMainnetHyperlaneUsdc"], IGRA_MAINNET_HYPERLANE_USDC);
         assert!(IMPLEMENTATION.contains("not kaspad"));
     }
 

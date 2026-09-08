@@ -1,9 +1,10 @@
 //! Circle USDC / CCTP facts used by this crate.
 //!
-//! Igra Galleon (chain 38836) is **not** a Circle-supported mint chain.
-//! Do not treat `GALLEON_TEST_USDC` as cash USDC. Do not deploy a USDC lookalike.
+//! Igra Galleon (chain 38836) and Igra mainnet (chain 38833) are **not**
+//! Circle-supported mint chains. Galleon test USDC and Igra Hyperlane USDC
+//! are not cash USDC. Do not deploy a USDC lookalike.
 
-use crate::network::GALLEON_TEST_USDC;
+use crate::network::{GALLEON_TEST_USDC, IGRA_MAINNET_HYPERLANE_USDC};
 
 /// Canonical Circle USDC on Ethereum (chain 1).
 /// Circle docs / solc checksum: 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
@@ -48,10 +49,18 @@ pub fn is_galleon_test_usdc(token: &str) -> bool {
     same_addr(token, GALLEON_TEST_USDC)
 }
 
+/// Igra Labs Hyperlane warp USDC. Synthetic / bridged, not a Circle mint.
+pub fn is_hyperlane_igra_usdc(token: &str) -> bool {
+    same_addr(token, IGRA_MAINNET_HYPERLANE_USDC)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::network::{CIRCLE_USDC_ON_GALLEON, IGRA_GALLEON_CHAIN_ID};
+    use crate::network::{
+        CIRCLE_USDC_ON_GALLEON, CIRCLE_USDC_ON_IGRA_MAINNET, IGRA_GALLEON_CHAIN_ID,
+        IGRA_MAINNET_CHAIN_ID, IGRA_MAINNET_HYPERLANE_USDC,
+    };
 
     #[test]
     fn galleon_is_not_a_circle_chain() {
@@ -69,5 +78,23 @@ mod tests {
         assert!(is_circle_usdc(1, CIRCLE_USDC_ETHEREUM));
         assert!(is_circle_usdc(8453, CIRCLE_USDC_BASE));
         assert!(!is_circle_usdc(1, GALLEON_TEST_USDC));
+    }
+
+    #[test]
+    fn igra_hyperlane_usdc_is_not_circle() {
+        assert_eq!(IGRA_MAINNET_CHAIN_ID, 38_833);
+        assert!(CIRCLE_USDC_ON_IGRA_MAINNET.is_none());
+        assert!(!circle_lists_chain(IGRA_MAINNET_CHAIN_ID));
+        assert_eq!(circle_usdc_on_chain(IGRA_MAINNET_CHAIN_ID), None);
+        assert!(is_hyperlane_igra_usdc(IGRA_MAINNET_HYPERLANE_USDC));
+        assert!(!is_circle_usdc(
+            IGRA_MAINNET_CHAIN_ID,
+            IGRA_MAINNET_HYPERLANE_USDC
+        ));
+        assert!(!same_addr(
+            IGRA_MAINNET_HYPERLANE_USDC,
+            CIRCLE_USDC_ETHEREUM
+        ));
+        assert!(!is_galleon_test_usdc(IGRA_MAINNET_HYPERLANE_USDC));
     }
 }

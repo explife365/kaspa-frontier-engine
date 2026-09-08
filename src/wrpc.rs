@@ -29,6 +29,10 @@ struct WrpcClientMessage<T> {
     params: T,
 }
 
+/// kaspad 2.0.1 has no `block_daa_score` filter on `notifyUtxosChanged`
+/// ([rusty-kaspa#939](https://github.com/kaspanet/rusty-kaspa/issues/939)).
+/// Do not send extra subscribe fields: this node rejects or ignores them.
+/// After subscribe, REST-scan while buffering unread frames, then apply them.
 pub fn encode_notify_utxos_changed(id: u64, addresses: &[String]) -> Result<String> {
     if addresses.is_empty() || addresses.len() > 100 {
         return Err(EngineError::Message(
@@ -77,6 +81,14 @@ pub fn encode_get_block_dag_info(id: u64) -> Result<String> {
     })?)
 }
 
+pub fn encode_get_connected_peer_info(id: u64) -> Result<String> {
+    Ok(serde_json::to_string(&WrpcClientMessage {
+        id,
+        method: "getConnectedPeerInfo",
+        params: serde_json::json!({}),
+    })?)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WrpcServerInfo {
@@ -96,6 +108,28 @@ pub struct WrpcBlockDagInfo {
     pub network: String,
     #[serde(deserialize_with = "crate::rest::de_u64_from_string_or_number")]
     pub virtual_daa_score: u64,
+    #[serde(
+        default,
+        deserialize_with = "crate::rest::de_u64_from_string_or_number"
+    )]
+    pub block_count: u64,
+    #[serde(
+        default,
+        deserialize_with = "crate::rest::de_u64_from_string_or_number"
+    )]
+    pub header_count: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+pub struct WrpcConnectedPeers {
+    #[serde(default, alias = "peerInfo")]
+    pub infos: Vec<WrpcConnectedPeerInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+pub struct WrpcConnectedPeerInfo {
+    #[serde(default, alias = "isIbdPeer")]
+    pub is_ibd_peer: bool,
 }
 
 pub fn decode_server_info_response(raw: &str, expected_id: u64) -> Result<WrpcServerInfo> {
@@ -106,6 +140,40 @@ pub fn decode_server_info_response(raw: &str, expected_id: u64) -> Result<WrpcSe
 pub fn decode_block_dag_info_response(raw: &str, expected_id: u64) -> Result<WrpcBlockDagInfo> {
     let params = response_params(raw, expected_id, "getBlockDagInfo")?;
     Ok(serde_json::from_value(params)?)
+}
+
+pub fn decode_connected_peer_info_response(
+    raw: &str,
+    expected_id: u64,
+) -> Result<WrpcConnectedPeers> {
+    let params = response_params(raw, expected_id, "getConnectedPeerInfo")?;
+    require_explicit_ibd_peer_fields(&params)?;
+    Ok(serde_json::from_value(params)?)
+}
+
+fn require_explicit_ibd_peer_fields(params: &Value) -> Result<()> {
+    let infos = params
+        .get("infos")
+        .or_else(|| params.get("peerInfo"))
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            EngineError::Message(
+                "owned-node getConnectedPeerInfo response is missing peer infos".into(),
+            )
+        })?;
+    for (index, peer) in infos.iter().enumerate() {
+        let object = peer.as_object().ok_or_else(|| {
+            EngineError::Message(format!(
+                "owned-node peer info [{index}] is not a JSON object"
+            ))
+        })?;
+        if !object.contains_key("is_ibd_peer") && !object.contains_key("isIbdPeer") {
+            return Err(EngineError::Message(format!(
+                "owned-node peer info [{index}] is missing is_ibd_peer"
+            )));
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -798,6 +866,48 @@ pub fn replay_into_ledger_addresses(
     })
 }
 
+/// Apply journal frames that arrived during a REST scan (rusty-kaspa#939).
+/// Unlike `apply_after_resnapshot`, these deltas are not subsumed by the snapshot.
+pub fn apply_pending_journal_frames(
+    journal: &mut WrpcJournal,
+    ledger: &mut DepositLedger,
+    projection: &mut WrpcDepositProjection,
+    source: &str,
+    watched_addresses: &[String],
+) -> Result<WrpcReplayReport> {
+    let starting_checkpoint = journal.checkpoint(source)?;
+    let frames = journal.frames(source)?;
+    for frame in &frames {
+        if frame.sequence <= starting_checkpoint {
+            continue;
+        }
+        let notification = decode_notification(&frame.raw_json)?;
+        if let WrpcNotification::VirtualDaaScoreChanged { virtual_daa_score } = &notification {
+            if projection
+                .virtual_daa
+                .is_some_and(|previous| *virtual_daa_score < previous)
+            {
+                journal.mark_applied(source, frame.sequence)?;
+                continue;
+            }
+        }
+        if let Some(snapshot) = projection.apply_addresses(notification, watched_addresses)? {
+            ledger.reconcile(
+                snapshot.virtual_daa,
+                &snapshot.observed,
+                &snapshot.confirmed,
+                &snapshot.disappeared_outpoints,
+            )?;
+        }
+        journal.mark_applied(source, frame.sequence)?;
+    }
+    Ok(WrpcReplayReport {
+        checkpoint: journal.checkpoint(source)?,
+        frame_count: frames.len(),
+        live_utxos: projection.live_count(),
+    })
+}
+
 impl WrpcDepositProjection {
     pub fn bootstrap(
         &mut self,
@@ -1227,6 +1337,10 @@ mod tests {
             r#"{"id":2,"method":"subscribe","params":{"VirtualDaaScoreChanged":{}}}"#
         );
         assert!(encode_notify_utxos_changed(3, &[]).is_err());
+        assert!(
+            !utxos.contains("blockDaaScore") && !utxos.contains("block_daa_score"),
+            "kaspad 2.0.1 has no min-DAA UtxosChanged filter (rusty-kaspa#939)"
+        );
         validate_subscription_ack(
             r#"{"id":1,"method":"subscribe","params":{"id":9}}"#,
             1,
@@ -1260,12 +1374,32 @@ mod tests {
         assert!(server.has_utxo_index);
         assert_eq!(server.virtual_daa_score, 554_030_001);
         let dag = decode_block_dag_info_response(
-            r#"{"id":11,"method":"getBlockDagInfo","params":{"blockCount":1,"network":"testnet-10","virtualDaaScore":554030002}}"#,
+            r#"{"id":11,"method":"getBlockDagInfo","params":{"blockCount":1,"headerCount":1437924,"network":"testnet-10","virtualDaaScore":554030002}}"#,
             11,
         )
         .unwrap();
         assert_eq!(dag.network, "testnet-10");
         assert_eq!(dag.virtual_daa_score, 554_030_002);
+        assert_eq!(dag.block_count, 1);
+        assert_eq!(dag.header_count, 1_437_924);
+        assert_eq!(
+            encode_get_connected_peer_info(12).unwrap(),
+            r#"{"id":12,"method":"getConnectedPeerInfo","params":{}}"#
+        );
+        let peers = decode_connected_peer_info_response(
+            r#"{"id":12,"method":"getConnectedPeerInfo","params":{"infos":[{"address":{"ip":"127.0.0.1","port":16211},"is_ibd_peer":true,"is_outbound":true}]}}"#,
+            12,
+        )
+        .unwrap();
+        assert_eq!(peers.infos.len(), 1);
+        assert!(peers.infos[0].is_ibd_peer);
+        assert!(decode_connected_peer_info_response(
+            r#"{"id":12,"method":"getConnectedPeerInfo","params":{"infos":[{"address":{"ip":"127.0.0.1","port":16211},"is_outbound":true}]}}"#,
+            12,
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("is_ibd_peer"));
         assert!(decode_server_info_response(
             r#"{"id":9,"method":"getServerInfo","params":{}}"#,
             10
@@ -1554,6 +1688,64 @@ mod tests {
             projection.live_count()
         );
         assert!(frames_per_second >= 100.0);
+    }
+
+    #[test]
+    fn buffered_subscribe_frames_apply_after_empty_rest_snapshot() {
+        let mut journal = WrpcJournal::open(":memory:").unwrap();
+        let mut ledger = DepositLedger::open(":memory:").unwrap();
+        let mut projection = WrpcDepositProjection::default();
+        projection.bootstrap(100, &[], ADDRESS).unwrap();
+        journal.append("live", &added_frame()).unwrap();
+        assert_eq!(journal.checkpoint("live").unwrap(), 0);
+        assert_eq!(projection.live_count(), 0);
+
+        let report = apply_pending_journal_frames(
+            &mut journal,
+            &mut ledger,
+            &mut projection,
+            "live",
+            &[ADDRESS.into()],
+        )
+        .unwrap();
+        assert_eq!(report.checkpoint, 1);
+        assert_eq!(report.live_utxos, 1);
+        assert_eq!(ledger.pending_count().unwrap(), 1);
+    }
+
+    #[test]
+    fn buffered_daa_behind_rest_snapshot_is_skipped() {
+        let mut journal = WrpcJournal::open(":memory:").unwrap();
+        let mut ledger = DepositLedger::open(":memory:").unwrap();
+        let mut projection = WrpcDepositProjection::default();
+        projection.bootstrap(200, &[], ADDRESS).unwrap();
+        journal
+            .append(
+                "live",
+                r#"{"method":"virtualDaaScoreChangedNotification","params":{"VirtualDaaScoreChanged":{"virtualDaaScore":"150"}}}"#,
+            )
+            .unwrap();
+        let report = apply_pending_journal_frames(
+            &mut journal,
+            &mut ledger,
+            &mut projection,
+            "live",
+            &[ADDRESS.into()],
+        )
+        .unwrap();
+        assert_eq!(report.checkpoint, 1);
+        assert_eq!(projection.virtual_daa, Some(200));
+    }
+
+    #[test]
+    fn apply_after_resnapshot_does_not_absorb_buffered_adds() {
+        let mut projection = WrpcDepositProjection::default();
+        projection.bootstrap(100, &[], ADDRESS).unwrap();
+        let skipped = projection
+            .apply_after_resnapshot(decode_notification(&added_frame()).unwrap(), ADDRESS)
+            .unwrap();
+        assert!(skipped.is_none());
+        assert_eq!(projection.live_count(), 0);
     }
 
     #[test]

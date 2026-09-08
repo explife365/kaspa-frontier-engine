@@ -1,0 +1,26 @@
+Independent TN10 integrator notes — 100 BPS packing sandbox (not activation)
+
+This is not a KIP, not a kaspad patch, and not a homemade testnet. Live L1 is GHOSTDAG @ 10 BPS with k=18 (Crescendo). 100 BPS is kaspa.org lore for a later hard fork. KIP-2 / DAGKnight remains Status: Proposed.
+https://github.com/kaspanet/kips/blob/master/kip-0002.md
+
+BPS is blocks per second, not TPS. The toy question is: in a ~1s delay window, about bps×L honest blocks can land together. GHOSTDAG’s k-cluster bound covers that window iff occupancy ≤ k.
+
+Method: in-process virtual miners, Poisson-like emits, one observer with a 1s delay window. Not kaspad. Not DAGKnight. Four miners, 20s, L=1s.
+
+Occupancy vs live k=18
+- 10 BPS (live): 200 blocks, max 14, mean 10.2, P(>18)=0 → k=18 covers (slack)
+- 100 BPS (lore): 2001 blocks, max 115, mean 97.6, P(>18)≈0.99 → k=18 does not
+
+SAT on the exact packing inequality bps×L ≤ k (Glucose-class CNF; arithmetic and solver agree)
+- 10 BPS / k=18 → SAT
+- 100 BPS / k=18 → UNSAT (k+1 pigeons into 18 holes)
+- 100 BPS / k=100 → SAT
+
+The useful extra: delay jitter overshoots the exact product. At 100 BPS, k=100 still overflowed (max occupancy 115, P(>100)≈0.46). In this toy, k=128 covered (P(>128)=0). So “just set k = BPS” is not enough if the window has delay variance.
+
+Takeaway for integrators
+- Today’s rehearsal target is 10 BPS with k=18 slack. That is live.
+- 100 BPS does not fit today’s k. A different k (research) or DAGKnight (KIP-2) is Core’s path: applied research in the KIP, implementation in rusty-kaspa, staged nets, kip-0002.md leaving Proposed, then a mainnet HF.
+- Independent SAT/occupancy does not mint that. Do not patch kaspad BPS, do not IBD a homemade 100 BPS net, do not print 100 as live DAA/s.
+
+Happy to answer questions here. No node RPC/P2P ports or private rehearsal hosts in this note.

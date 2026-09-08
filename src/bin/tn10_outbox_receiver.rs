@@ -5,7 +5,12 @@ use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{BoxError, Json, Router};
-use kaspa_frontier_engine::{DeliveryEnvelope, EngineError, InboxOutcome, OutboxReceiverStore};
+use kaspa_frontier_engine::network::TESTNET_10_REST;
+use kaspa_frontier_engine::{
+    finish_gate_options, print_gate_preflight, run_owned_node_gate, try_parse_gate_flag,
+    DeliveryEnvelope, EngineError, InboxOutcome, OwnedNodeGateOptions, OutboxReceiverStore,
+    Tn10RestClient,
+};
 use serde::Serialize;
 use std::env;
 use std::fs;
@@ -35,6 +40,8 @@ struct Options {
     tls_cert: Option<PathBuf>,
     tls_key: Option<PathBuf>,
     tls_client_ca: Option<PathBuf>,
+    allow_cleartext_loopback: bool,
+    gate: OwnedNodeGateOptions,
 }
 
 #[derive(Serialize)]
@@ -57,7 +64,7 @@ struct ErrorResponse {
 }
 
 fn usage() -> &'static str {
-    "usage: tn10-outbox-receiver [--bind 127.0.0.1:18320] [--database PATH] [--tls-cert PEM] [--tls-key PEM] [--tls-client-ca PEM]"
+    "usage: tn10-outbox-receiver [--bind 127.0.0.1:18320] [--database PATH] [--dual] [--min-healthy N] [--require-healthy N] [--max-daa-lag N] [--tls-cert PEM] [--tls-key PEM] [--tls-client-ca PEM] [--allow-cleartext-loopback]"
 }
 
 fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, String> {
@@ -68,8 +75,14 @@ fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, St
     let mut tls_cert = None;
     let mut tls_key = None;
     let mut tls_client_ca = None;
+    let mut allow_cleartext_loopback = false;
+    let mut gate = OwnedNodeGateOptions::default();
+    let mut dual = false;
     let mut args = arguments.into_iter();
     while let Some(argument) = args.next() {
+        if try_parse_gate_flag(&mut gate, &mut dual, &argument, &mut args)? {
+            continue;
+        }
         match argument.as_str() {
             "--bind" => {
                 bind = args
@@ -90,6 +103,7 @@ fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, St
                     args.next().ok_or("--tls-client-ca needs a path")?,
                 ))
             }
+            "--allow-cleartext-loopback" => allow_cleartext_loopback = true,
             _ => return Err(format!("unknown argument {argument}")),
         }
     }
@@ -109,12 +123,20 @@ fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, St
             return Err("mTLS requires --tls-cert, --tls-key, and --tls-client-ca together".into())
         }
     }
+    if tls_cert.is_none() && !allow_cleartext_loopback {
+        return Err(
+            "loopback HTTP receiver is disabled; pass --tls-cert --tls-key --tls-client-ca or --allow-cleartext-loopback for local rehearsal"
+                .into(),
+        );
+    }
     Ok(Options {
         bind,
         database,
         tls_cert,
         tls_key,
         tls_client_ca,
+        allow_cleartext_loopback,
+        gate: finish_gate_options(gate, dual)?,
     })
 }
 
@@ -254,6 +276,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let store = Arc::new(Mutex::new(OutboxReceiverStore::open(&options.database)?));
+    if options.gate.min_healthy > 0 {
+        let rest = Tn10RestClient::new(TESTNET_10_REST)?;
+        let summary = run_owned_node_gate(
+            &options.gate.urls,
+            &rest,
+            options.gate.max_daa_lag,
+            options.gate.min_healthy,
+        )
+        .await?;
+        print_gate_preflight(&summary);
+    }
     match (
         options.tls_cert.as_deref(),
         options.tls_key.as_deref(),
@@ -277,9 +310,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("listen      http://{}", options.bind);
             println!("endpoint    /kaspa-events");
             println!("database    {}", options.database.display());
-            println!(
-                "security    loopback HTTP; pass --tls-cert --tls-key --tls-client-ca for mTLS"
-            );
+            if options.allow_cleartext_loopback {
+                println!(
+                    "security    loopback HTTP (--allow-cleartext-loopback); use mTLS for production"
+                );
+            }
             axum::serve(listener, app(store)).await?;
         }
     }
@@ -325,7 +360,13 @@ mod tests {
 
     #[test]
     fn parser_refuses_public_bind() {
-        assert!(parse_args(["--bind".into(), "127.0.0.1:19000".into()]).is_ok());
+        assert!(parse_args(["--bind".into(), "127.0.0.1:19000".into()]).is_err());
+        assert!(parse_args([
+            "--bind".into(),
+            "127.0.0.1:19000".into(),
+            "--allow-cleartext-loopback".into(),
+        ])
+        .is_ok());
         assert!(parse_args(["--bind".into(), "0.0.0.0:19000".into()]).is_err());
         assert!(parse_args(["--tls-cert".into(), "server.pem".into()]).is_err());
         let tls = parse_args([
@@ -338,6 +379,15 @@ mod tests {
         ])
         .unwrap();
         assert!(tls.tls_cert.is_some() && tls.tls_key.is_some() && tls.tls_client_ca.is_some());
+        let gated = parse_args([
+            "--allow-cleartext-loopback".into(),
+            "--dual".into(),
+            "--min-healthy".into(),
+            "2".into(),
+        ])
+        .unwrap();
+        assert_eq!(gated.gate.urls.len(), 2);
+        assert_eq!(gated.gate.min_healthy, 2);
     }
 
     #[tokio::test]

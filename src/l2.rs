@@ -2,7 +2,8 @@
 
 use crate::error::{EngineError, Result};
 use crate::network::{
-    IGRA_GALLEON_CHAIN_ID, IGRA_GALLEON_RPC, KASPLEX_L2_CHAIN_ID, KASPLEX_L2_RPC,
+    IGRA_GALLEON_CHAIN_ID, IGRA_GALLEON_RPC, IGRA_MAINNET_CHAIN_ID, IGRA_MAINNET_RPC,
+    KASPLEX_L2_CHAIN_ID, KASPLEX_L2_RPC,
 };
 use crate::rest::{http_send_post, https_json_client, require_https};
 use serde::Deserialize;
@@ -230,6 +231,10 @@ pub async fn probe_igra_galleon() -> Result<EvmChainProbe> {
     probe_named("Igra Galleon", IGRA_GALLEON_RPC, IGRA_GALLEON_CHAIN_ID).await
 }
 
+pub async fn probe_igra_mainnet() -> Result<EvmChainProbe> {
+    probe_named("Igra Mainnet", IGRA_MAINNET_RPC, IGRA_MAINNET_CHAIN_ID).await
+}
+
 pub async fn probe_kasplex_l2() -> Result<EvmChainProbe> {
     probe_named("Kasplex L2", KASPLEX_L2_RPC, KASPLEX_L2_CHAIN_ID).await
 }
@@ -237,11 +242,12 @@ pub async fn probe_kasplex_l2() -> Result<EvmChainProbe> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::network::{IGRA_GALLEON_CHAIN_ID, KASPLEX_L2_CHAIN_ID};
+    use crate::network::{IGRA_GALLEON_CHAIN_ID, IGRA_MAINNET_CHAIN_ID, KASPLEX_L2_CHAIN_ID};
 
     #[test]
     fn parses_galleon_and_kasplex_chain_ids() {
         assert_eq!(parse_hex_u64("0x97b4").unwrap(), IGRA_GALLEON_CHAIN_ID);
+        assert_eq!(parse_hex_u64("0x97b1").unwrap(), IGRA_MAINNET_CHAIN_ID);
         assert_eq!(parse_hex_u64("0x28C64").unwrap(), KASPLEX_L2_CHAIN_ID);
         assert!(parse_hex_u64("nope").is_err());
     }

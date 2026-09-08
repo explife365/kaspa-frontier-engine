@@ -5,6 +5,8 @@
 kaspa.env
 .idea
 .vscode
+.cursor/
+.pytest_cache/
 .local/
 examples/galleon/out/
 examples/galleon/cache/

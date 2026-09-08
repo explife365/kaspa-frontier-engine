@@ -1,0 +1,17 @@
+Follow-up from TN10 integrator rehearsal (public repo: https://github.com/explife365/kaspa-frontier-engine).
+
+Pinned `kaspa` 2.0.2rc1 still drops `computeBudget` on `TransactionInput.to_dict()`, so Toccata v1 SilverScript broadcasts fail closed (effective budget 0 after RPC round-trip). `from_dict` already accepts the key.
+
+Repro gate in the integrator repo:
+
+```bash
+python scripts/tn10_sdk_gate.py --json
+```
+
+Current output: `computeBudgetOk: false`, `silverscriptOk: true`, PR #78 `OPEN`.
+
+Three reference covenant apps (counter, timelock vault, restricted swap) are ready to broadcast once a **published wheel** includes this fix **and** the SilverScript native extension (git-only pip builds on Windows dropped silverscript in our environment).
+
+Not in scope: rusty-kaspa#1074 (WASM wallet generator). Not a kaspad change.
+
+Happy to refresh public TN10 proof fixtures and link txids here after merge + release.

@@ -3,7 +3,8 @@
 use crate::error::{EngineError, Result};
 use crate::network::require_tn10;
 use crate::wrpc::{
-    decode_block_dag_info_response, decode_server_info_response, encode_get_block_dag_info,
+    decode_block_dag_info_response, decode_connected_peer_info_response,
+    decode_server_info_response, encode_get_block_dag_info, encode_get_connected_peer_info,
     encode_get_server_info, WrpcBlockDagInfo, WrpcServerInfo, MAX_WRPC_FRAME_BYTES,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -17,12 +18,71 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(10);
 const MIN_SERVER_VERSION: (u64, u64, u64) = (2, 0, 1);
 const MAX_INTERNAL_DAA_DELTA: u64 = 100;
+const MAX_HEADER_BODY_GAP: u64 = 100;
 pub const MAX_OWNED_NODE_URLS: usize = 8;
+
+/// Machine-readable owned-node sync stage for supervisors (not consensus).
+pub const STAGE_HEALTHY: &str = "healthy";
+pub const STAGE_UTXO_COMMIT: &str = "utxo_commit";
+pub const STAGE_DAG_INCOMPLETE: &str = "dag_incomplete";
+pub const STAGE_BODY_SYNC: &str = "body_sync";
+pub const STAGE_IBD_PEERS: &str = "ibd_peers";
+pub const STAGE_NO_PEERS: &str = "no_peers";
+pub const STAGE_FINISHING_SYNC: &str = "finishing_sync";
+pub const STAGE_MISSING_UTXOINDEX: &str = "missing_utxoindex";
+pub const STAGE_UNREACHABLE: &str = "unreachable";
+
+/// Classify probe data without applying the full health gate (monitoring only).
+pub fn owned_node_stage(health: &OwnedNodeHealth) -> &'static str {
+    if !health.server.has_utxo_index {
+        return STAGE_MISSING_UTXOINDEX;
+    }
+    if health.server.virtual_daa_score == 0 || health.dag.virtual_daa_score == 0 {
+        return STAGE_UTXO_COMMIT;
+    }
+    if health.dag.virtual_daa_score > 0 && health.dag.header_count == 0 {
+        return STAGE_DAG_INCOMPLETE;
+    }
+    let header_body_gap = health
+        .dag
+        .header_count
+        .saturating_sub(health.dag.block_count);
+    if header_body_gap > MAX_HEADER_BODY_GAP {
+        return STAGE_BODY_SYNC;
+    }
+    if health.ibd_peers > 0 {
+        return STAGE_IBD_PEERS;
+    }
+    if health.connected_peers == 0 {
+        return STAGE_NO_PEERS;
+    }
+    if !health.server.is_synced {
+        return STAGE_FINISHING_SYNC;
+    }
+    STAGE_HEALTHY
+}
+
+pub fn owned_node_stage_label(stage: &str) -> &'static str {
+    match stage {
+        STAGE_HEALTHY => "healthy",
+        STAGE_UTXO_COMMIT => "UTXO commit (DAA 0)",
+        STAGE_DAG_INCOMPLETE => "DAG incomplete (header_count 0)",
+        STAGE_BODY_SYNC => "body sync (header/body gap)",
+        STAGE_IBD_PEERS => "IBD peers connected",
+        STAGE_NO_PEERS => "no connected peers",
+        STAGE_FINISHING_SYNC => "finishing sync (isSynced=false)",
+        STAGE_MISSING_UTXOINDEX => "missing --utxoindex",
+        STAGE_UNREACHABLE => "wRPC unreachable",
+        _ => "unknown",
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OwnedNodeHealth {
     pub server: WrpcServerInfo,
     pub dag: WrpcBlockDagInfo,
+    pub connected_peers: u64,
+    pub ibd_peers: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,6 +91,9 @@ pub struct OwnedNodeAssessment {
     pub public_daa: u64,
     pub behind_public_daa: u64,
     pub server_dag_delta: u64,
+    pub header_body_gap: u64,
+    pub connected_peers: u64,
+    pub ibd_peers: u64,
 }
 
 pub fn require_loopback_wrpc_url(raw: &str) -> Result<()> {
@@ -143,10 +206,15 @@ pub async fn probe_owned_node(url: &str) -> Result<OwnedNodeHealth> {
         .send(Message::Text(encode_get_block_dag_info(2)?.into()))
         .await
         .map_err(|error| EngineError::Message(format!("wRPC send failed: {error}")))?;
+    socket
+        .send(Message::Text(encode_get_connected_peer_info(3)?.into()))
+        .await
+        .map_err(|error| EngineError::Message(format!("wRPC send failed: {error}")))?;
 
     let mut server = None;
     let mut dag = None;
-    while server.is_none() || dag.is_none() {
+    let mut peers = None;
+    while server.is_none() || dag.is_none() || peers.is_none() {
         let raw = receive_text(&mut socket).await?;
         let value: serde_json::Value = serde_json::from_str(&raw)?;
         match value.get("id").and_then(serde_json::Value::as_u64) {
@@ -155,6 +223,9 @@ pub async fn probe_owned_node(url: &str) -> Result<OwnedNodeHealth> {
             }
             Some(2) if dag.is_none() => {
                 dag = Some(decode_block_dag_info_response(&raw, 2)?);
+            }
+            Some(3) if peers.is_none() => {
+                peers = Some(decode_connected_peer_info_response(&raw, 3)?);
             }
             Some(id) => {
                 return Err(EngineError::Message(format!(
@@ -169,9 +240,15 @@ pub async fn probe_owned_node(url: &str) -> Result<OwnedNodeHealth> {
         }
     }
     let _ = socket.close(None).await;
+    let peers = peers.expect("peer response checked");
+    let connected_peers = u64::try_from(peers.infos.len()).unwrap_or(u64::MAX);
+    let ibd_peers = u64::try_from(peers.infos.iter().filter(|peer| peer.is_ibd_peer).count())
+        .unwrap_or(u64::MAX);
     Ok(OwnedNodeHealth {
         server: server.expect("server response checked"),
         dag: dag.expect("DAG response checked"),
+        connected_peers,
+        ibd_peers,
     })
 }
 
@@ -187,14 +264,44 @@ pub fn assess_owned_node(
     }
     require_tn10(&health.server.network_id)?;
     require_tn10(&health.dag.network)?;
-    if !health.server.is_synced {
-        return Err(EngineError::Message(
-            "owned TN10 node reports isSynced=false".into(),
-        ));
-    }
     if !health.server.has_utxo_index {
         return Err(EngineError::Message(
             "owned TN10 node must run with --utxoindex".into(),
+        ));
+    }
+    if health.server.virtual_daa_score == 0 || health.dag.virtual_daa_score == 0 {
+        return Err(EngineError::Message(
+            "owned TN10 node is still importing the pruning-point UTXO set (DAA 0)".into(),
+        ));
+    }
+    if health.dag.virtual_daa_score > 0 && health.dag.header_count == 0 {
+        return Err(EngineError::Message(
+            "owned TN10 node DAG response has zero header_count while DAA > 0".into(),
+        ));
+    }
+    let header_body_gap = health
+        .dag
+        .header_count
+        .saturating_sub(health.dag.block_count);
+    if header_body_gap > MAX_HEADER_BODY_GAP {
+        return Err(EngineError::Message(format!(
+            "owned TN10 node has {header_body_gap} headers without bodies; maximum is {MAX_HEADER_BODY_GAP}"
+        )));
+    }
+    if health.ibd_peers > 0 {
+        return Err(EngineError::Message(format!(
+            "owned TN10 node still has {} IBD peer(s); kaspad isSynced is not enough",
+            health.ibd_peers
+        )));
+    }
+    if health.connected_peers == 0 {
+        return Err(EngineError::Message(
+            "owned TN10 node has no connected peers".into(),
+        ));
+    }
+    if !health.server.is_synced {
+        return Err(EngineError::Message(
+            "owned TN10 node reports isSynced=false".into(),
         ));
     }
     let version = parse_version(&health.server.server_version)?;
@@ -228,6 +335,9 @@ pub fn assess_owned_node(
         public_daa,
         behind_public_daa,
         server_dag_delta,
+        header_body_gap,
+        connected_peers: health.connected_peers,
+        ibd_peers: health.ibd_peers,
     })
 }
 
@@ -307,8 +417,31 @@ mod tests {
             dag: WrpcBlockDagInfo {
                 network: "testnet-10".into(),
                 virtual_daa_score: 1_001,
+                block_count: 1_000,
+                header_count: 1_000,
             },
+            connected_peers: 3,
+            ibd_peers: 0,
         }
+    }
+
+    #[test]
+    fn owned_node_stage_labels_ibd_progression() {
+        assert_eq!(owned_node_stage(&healthy()), STAGE_HEALTHY);
+        let mut utxo = healthy();
+        utxo.dag.virtual_daa_score = 0;
+        assert_eq!(owned_node_stage(&utxo), STAGE_UTXO_COMMIT);
+        let mut bodies = healthy();
+        bodies.dag.block_count = 1;
+        bodies.dag.header_count = 10_000;
+        assert_eq!(owned_node_stage(&bodies), STAGE_BODY_SYNC);
+        let mut ibd = healthy();
+        ibd.ibd_peers = 1;
+        assert_eq!(owned_node_stage(&ibd), STAGE_IBD_PEERS);
+        assert_eq!(
+            owned_node_stage_label(STAGE_BODY_SYNC),
+            "body sync (header/body gap)"
+        );
     }
 
     #[test]
@@ -341,6 +474,42 @@ mod tests {
     }
 
     #[test]
+    fn health_assessment_rejects_ibd_header_gap_and_isolation() {
+        let mut unhealthy = healthy();
+        unhealthy.ibd_peers = 1;
+        assert!(assess_owned_node(&unhealthy, 1_010, 10)
+            .unwrap_err()
+            .to_string()
+            .contains("IBD peer"));
+        let mut unhealthy = healthy();
+        unhealthy.connected_peers = 0;
+        assert!(assess_owned_node(&unhealthy, 1_010, 10)
+            .unwrap_err()
+            .to_string()
+            .contains("no connected peers"));
+        let mut unhealthy = healthy();
+        unhealthy.dag.header_count = 1_437_924;
+        unhealthy.dag.block_count = 1;
+        assert!(assess_owned_node(&unhealthy, 1_010, 10)
+            .unwrap_err()
+            .to_string()
+            .contains("headers without bodies"));
+        let mut unhealthy = healthy();
+        unhealthy.dag.virtual_daa_score = 0;
+        assert!(assess_owned_node(&unhealthy, 1_010, 10)
+            .unwrap_err()
+            .to_string()
+            .contains("DAA 0"));
+        let mut unhealthy = healthy();
+        unhealthy.dag.header_count = 0;
+        unhealthy.dag.virtual_daa_score = 1_001;
+        assert!(assess_owned_node(&unhealthy, 1_010, 10)
+            .unwrap_err()
+            .to_string()
+            .contains("header_count"));
+    }
+
+    #[test]
     fn version_parser_accepts_release_suffixes_only() {
         assert_eq!(parse_version("v2.0.1").unwrap(), (2, 0, 1));
         assert_eq!(parse_version("2.1.0-rc1").unwrap(), (2, 1, 0));
@@ -354,6 +523,9 @@ mod tests {
             public_daa: 100,
             behind_public_daa: behind,
             server_dag_delta: 0,
+            header_body_gap: 0,
+            connected_peers: 3,
+            ibd_peers: 0,
         }
     }
 

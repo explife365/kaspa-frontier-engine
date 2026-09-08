@@ -1,0 +1,29 @@
+TN10 integrator rehearsal crate (public) — not kaspad, not consensus
+
+Repo: https://github.com/explife365/kaspa-frontier-engine
+
+What ships today on testnet-10:
+- N-of-M owned-node health gate (dual laptop + replica wrpc)
+- Durable deposits / withdrawals with DAA confirmation + SQLite restart safety
+- wRPC live ingestion + subscribe-ack journal replay (rusty-kaspa#939 pattern)
+- Bounded tn10-covenant-rpc shim (REST + kascov; not kaspad getUtxosByCovenantId)
+- tn10-proof: counter / timelock vault / restricted swap proof bundles
+- Evidence pack: scripts/integrator_evidence_pack.ps1
+
+Blocked on kaspa-python-sdk#78 (computeBudget dropped on TransactionInput.to_dict):
+- SilverScript covenant broadcast fail-closed until a published wheel includes the fix
+- Repro + gate: python scripts/tn10_sdk_gate.py --json
+- PR comment context: scripts/sdk_pr78_comment.md
+
+Not claimed:
+- Not a rusty-kaspa consensus patch
+- Not DAGKnight / 100 BPS activation
+- Not Circle USDC or Uniswap on L1
+
+Useful for Core/SDK/wallet teams:
+- Reference covenant apps under examples/silverscript/
+- KIP path for getUtxosByCovenantId until kaspad exposes it
+- Integrator evidence for exchange rehearsal (see scripts/certik_score_plan.md)
+
+Rehearsal entrypoint:
+  powershell -File scripts/tn10_rehearsal.ps1 -Covenant

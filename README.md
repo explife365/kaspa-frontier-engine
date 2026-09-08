@@ -12,7 +12,14 @@ Independent developer of this crate. Optional mainnet KAS (not the official Kasp
 
 https://explorer.kaspa.org/addresses/kaspa:qpxdemlyx445kt5xteux0qhadaw8lh5m0vnqvcy8fh483t70usgkkeulsx9cm
 
-## What this is
+## Public repo (Kaspa dev / integrator sharing)
+
+Canonical public home: **https://github.com/explife365/kaspa-frontier-engine**
+
+Copy-paste intro for Discord or GitHub discussions: [`scripts/kaspa_dev_share_post.txt`](scripts/kaspa_dev_share_post.txt). SDK `computeBudget` gate: `python scripts/tn10_sdk_gate.py --json`. Nudge text for [kaspa-python-sdk PR #78](https://github.com/kaspanet/kaspa-python-sdk/pull/78): [`scripts/sdk_pr78_pr_comment.txt`](scripts/sdk_pr78_pr_comment.txt).
+
+Not kaspad, not consensus, not an exchange listing path — TN10 rehearsal only.
+
 
 | Module | Role |
 | --- | --- |
@@ -41,6 +48,10 @@ cargo run --release --bin tn10-status
 cargo run --release --bin tn10-deposits -- kaspatest:<addr> --ledger .local/tn10-deposits.sqlite
 cargo run --release --bin tn10-withdraw -- kaspatest:<dest> <txid> <vout> <amount-sompi> 60 --database .local/tn10-withdrawals.sqlite
 cargo run --release --bin tn10-proof
+cargo run --release --bin tn10-proof -- fixtures/tn10-counter-proof.json --json
+cargo run --release --bin tn10-proof -- fixtures/tn10-counter-proof.json --kascov-only --json
+powershell -File scripts/tn10_covenant_rehearsal.ps1
+powershell -File scripts/tn10_covenant_rpc_smoke.ps1 -Json
 cargo run --release --bin tn10-covenant-rpc
 python examples/silverscript/counter.py --print-address
 python examples/silverscript/counter.py
@@ -77,7 +88,7 @@ owned-node transport is also available; start a synced TN10 node with `--utxoind
 cargo run --bin tn10-wrpc-live -- kaspatest:qptv6u8kel95drh2p2z492cyksk8lpetep286fngqu5j9nk57g642lzf748kt --resnapshot-only
 cargo run --bin tn10-wrpc-live -- kaspatest:qptv6u8kel95drh2p2z492cyksk8lpetep286fngqu5j9nk57g642lzf748kt
 cargo run --bin tn10-wrpc-live -- kaspatest:<deposit-1> kaspatest:<deposit-2> --database .local/tn10-custody.sqlite
-cargo run --release --bin tn10-wrpc-live -- kaspatest:<deposit-1> --url ws://127.0.0.1:18210 --url ws://127.0.0.1:28210
+cargo run --release --bin tn10-wrpc-live -- kaspatest:<deposit-1> --dual
 ```
 
 Cleartext wRPC is restricted to loopback. Startup, reconnect, and periodic recovery perform
@@ -99,8 +110,11 @@ pool after a disconnect and prefers a healthy replica before rotating in order:
 ```powershell
 cargo run --release --bin tn10-node-health
 cargo run --release --bin tn10-node-health -- --json --max-daa-lag 100
-cargo run --release --bin tn10-node-health -- --url ws://127.0.0.1:18210 --url ws://127.0.0.1:28210 --min-healthy 2 --json
+cargo run --release --bin tn10-node-health -- --dual --min-healthy 2 --json
+powershell -File scripts/tn10_gate.ps1 -Json
 ```
+
+JSON reports include `stage` / `stageLabel` per node (`utxo_commit`, `body_sync`, `ibd_peers`, `healthy`, …). `python scripts/tn10_ibd_watch.py --json` polls the same stages without applying the full gate. One-shot rehearsal: `powershell -File scripts/tn10_rehearsal.ps1` (sets `TN10_MIN_HEALTHY=2`; add `-Covenant` for L1 covenant path). Covenant rehearsal: `scripts/tn10_covenant_rehearsal.ps1` (offline proof + RPC smoke + `--kascov-only` live verify). Evidence pack writes `.local/evidence/evidence_<stamp>.txt` plus combined `evidence_<stamp>.json` (IBD watch + gate + covenant proof + RPC smoke). Deposit, withdrawal, wRPC live ingestion, outbox `deliver`, and outbox receiver accept the same gate flags (`--dual`, `--min-healthy` / `--require-healthy`, `--max-daa-lag`); when `--min-healthy` is set they fail closed before polling, delivery, or bind. Env: `TN10_MIN_HEALTHY`, `TN10_OWNED_NODE_URLS` (comma-separated wRPC URLs).
 
 For production, place those ports behind loopback-only tunnels or sidecars connected to
 operationally independent kaspad hosts; two ports on one host do not remove host-level failure.
@@ -111,16 +125,16 @@ to the world:
 
 ```powershell
 powershell -File scripts/tn10_host02_tunnel.ps1
-cargo run --release --bin tn10-node-health -- --url ws://127.0.0.1:18210 --url ws://127.0.0.1:28210 --min-healthy 2 --json
+cargo run --release --bin tn10-node-health -- --dual --min-healthy 2 --json
 ```
 
-The tunnel stays on loopback and reconnects after SSH resets. After host02 finished IBD, `--min-healthy 2` is green when the local node is also within 100 DAA.
+The tunnel stays on loopback and reconnects after SSH resets. `--min-healthy 2` is green when both replicas are synced and within 100 DAA.
 
 The deposit outbox never auto-acknowledges. Inspect it, explicitly acknowledge a manually
 handled event, or deliver leased events to an HTTPS webhook:
 
 ```powershell
-cargo run --release --bin tn10-outbox-receiver -- --database .local/tn10-outbox-receiver.sqlite
+cargo run --release --bin tn10-outbox-receiver -- --allow-cleartext-loopback --database .local/tn10-outbox-receiver.sqlite
 cargo run --bin tn10-outbox -- list
 cargo run --bin tn10-outbox -- dead
 cargo run --bin tn10-outbox -- requeue 1
@@ -141,7 +155,8 @@ migrate transactionally to schema v3.
 `tn10-outbox-receiver` validates the versioned body, exact TN10 address and
 `credit|reverse:<txid>:<vout>` key before a FULL-synchronous transaction inserts it. The first
 delivery returns 201, an identical retry returns 200, and reuse of a key with different facts
-returns 409 without changing the inbox. It binds only to loopback. For authenticated delivery
+returns 409 without changing the inbox. It binds only to loopback. Cleartext HTTP requires
+`--allow-cleartext-loopback` (local rehearsal only). For authenticated delivery
 on that bind, generate a rehearsal CA and require a client certificate:
 
 ```powershell
@@ -158,13 +173,15 @@ under SQLite WAL with `synchronous=FULL`. A restart can therefore confirm an acc
 withdrawal from its durable block DAA even after the recipient spends the output. Conflicting
 txid/vout/address/amount/block-DAA facts and accepted-to-rejected transitions fail closed.
 
-`counter.py --print-address` remains safe, but transaction funding/broadcast currently fails closed: the pinned Python SDK drops the Toccata v1 `computeBudget` field during serialization. Resume covenant broadcasts only after installing a build containing [rusty-kaspa PR #1074](https://github.com/kaspanet/rusty-kaspa/pull/1074) and updating the conformance test.
+`counter.py --print-address` remains safe, but transaction funding/broadcast currently fails closed: the pinned Python SDK drops the Toccata v1 `computeBudget` field during serialization. Resume covenant broadcasts only after installing a published wheel that includes [kaspa-python-sdk PR #78](https://github.com/kaspanet/kaspa-python-sdk/pull/78) and updating the conformance test. [rusty-kaspa PR #1074](https://github.com/kaspanet/rusty-kaspa/pull/1074) is a separate WASM/generator change.
 
 Optional local node (rusty-kaspa **v2.0.1** Toccata, wRPC JSON on 18210). Binaries live in `%LOCALAPPDATA%\kaspa\v2.0.1` (on user PATH):
 
-```bat
-kaspad --testnet --netsuffix=10 --utxoindex --rpclisten-json=default
+```powershell
+powershell -File scripts/tn10_kaspad.ps1
 ```
+
+That launcher always passes `--appdir %LOCALAPPDATA%\kaspa\tn10` and binds JSON/gRPC to `127.0.0.1` only. Starting `kaspad` without `--appdir` creates a second header-only copy under `%LOCALAPPDATA%\rusty-kaspa`.
 
 Galleon ERC-20 (Igra L2 **38836**, Foundry **v1.7.1** + solc **0.8.24**). Binaries live in `%USERPROFILE%\.foundry\bin`:
 
@@ -202,17 +219,17 @@ From kaspa.org’s integrator call, the Toccata guide, and kascov (not Discord �
 
 | Ask | Who | This crate |
 | --- | --- | --- |
-| Run a TN10 node and test deposits / withdrawals / indexing / tx parsing | Core, pools, exchanges | `tn10-deposits` + restart-safe `tn10-withdraw` (REST DAA). The owned kaspad v2.0.1 is synced with `--utxoindex`; `tn10-node-health` provides a fail-closed readiness gate. We do not ship kaspad. |
+| Run a TN10 node and test deposits / withdrawals / indexing / tx parsing | Core, pools, exchanges | `tn10-deposits` + restart-safe `tn10-withdraw` (REST DAA). Owned kaspad v2.0.1 uses `--appdir %LOCALAPPDATA%\kaspa\tn10`; `tn10-node-health` fail-closes on UTXO import (DAA 0), IBD peers, header/body gap, lag, and N-of-M. Dual `--min-healthy 2` when laptop + host02 tunnel are synced. We do not ship kaspad. |
 | Parse v1 txs: `storageMass`, `compute_budget`, output `covenant_id` | rusty-kaspa Toccata guide | `tn10-proof` requires exact selected-output lineage and the complete previous outpoint of each covenant-authorizing input |
 | Fee estimation rehearsal | kaspa.org integrator call | `tn10-status` and `tn10_transfer.py` print `/info/fee-estimate` (minimum standard mempool/RPC policy, not consensus) |
 | Wallet / explorer covenant decode (UX lag) | Core R&D | Toccata is live (~517 mainnet covenants vs ~80k TN10). We print lineage; Covex / [kascov](https://kascov.io/) are the UIs. |
 | `getUtxosByCovenantId` on the node | Missing in kaspad | Community indexer: `https://kascov.io/data/testnet-10/c/<id>.json`. Local bounded Axum shim: `tn10-covenant-rpc` (REST+kascov, loopback by default, unverified community UTXOs, **not** kaspad). |
-| Silverscript apps with public TN10 txids | Toccata docs | `examples/silverscript/counter.py`; checked-in offline evidence under `fixtures/`, with `cargo run --release --bin tn10-proof` as a read-only live smoke test |
+| Silverscript apps with public TN10 txids | Toccata docs | `counter.py` + `timelock_vault.py` + `restricted_swap.py` (broadcast blocked until SDK #78); checked-in `fixtures/tn10-counter-proof.json`; vault/swap proofs pending (`fixtures/tn10-*-proof.PENDING.md`); `tn10-proof` + `scripts/tn10_covenant_rehearsal.ps1` |
 | EVM stables / Uniswap | Igra / Kasplex L2, **not** L1 | L1 has no EVM (UTXO + Toccata covenants). Solidity lives on Galleon `38836` / Kasplex L2 `167012`. `gTEST` `0xbc5e27ab…5d7d` is on Galleon (not USD). Circle USDC is not listed. Uniswap cannot be created on kaspad. |
 | KRC-20 commit/reveal vs `tn10api.kasplex.org` | Kasplex | `tn10-kasplex` + `examples/kasplex_krc20.py`. Frontier tick **TMBMN** is live (mint+transfer). Not USD. `--deploy` of a crate-owned tick burns **1000 tKAS**. |
 | DAGKnight / 100 BPS lore | Narrative only | KIP-2 Proposed. Live is GHOSTDAG @ 10 BPS. Fake telemetry does not activate it. Refused. |
 | Archival / indexer cost | Exchanges / ops | Need `getUtxosByAddresses` + DAA depth, not a simulated worker. `cex::snapshot_address` + `tn10-deposits` / `tn10-withdraw`. |
-| CEX integration rehearsal | Integrator call / `Kaspa to do.pdf` | Partial: bounded multi-address snapshots/ingestion, durable exact withdrawals, scheduled/dead-letter idempotency-key webhook outbox, atomic deduplicating receiver inbox, delta-driven durable wRPC replay, ordered owned-node failover, N-of-M supervisor health, and loopback mTLS on the webhook receiver. host02 is the independent replica (synced; tunnel `127.0.0.1:28210`). Live wrpc-live failed over from local 18210 to host02 28210. Do not bind 18210/18320 publicly. |
+| CEX integration rehearsal | Integrator call / `Kaspa to do.pdf` | Partial: bounded multi-address snapshots/ingestion, durable exact withdrawals, scheduled/dead-letter idempotency-key webhook outbox, atomic deduplicating receiver inbox, delta-driven durable wRPC replay, ordered owned-node failover, N-of-M supervisor health, loopback mTLS on the webhook receiver, and mTLS required to deliver off-loopback. host02 is the independent replica (tunnel `127.0.0.1:28210`). Do not bind 18210/18320 publicly. |
 
 Do **not** open unofficial consensus PRs against rusty-kaspa. Acceptable PRs there follow their review process and KIPs.
 
@@ -245,6 +262,8 @@ kaspad is not waiting on this crate. Live L1 is UTXO + GHOSTDAG @ 10 BPS + Tocca
 | Binance/Coinbase spot | Exchange custody + demand | The CEX. This crate only rehearses deposit/withdraw DAA |
 
 `tn10-status` prints **what is blocking kaspad**, integrator next, and this crate’s 14-row community-ask board (tally of shipped/partial/l2/refused). Do not patch rusty-kaspa to fake any of it.
+
+**CertiK Skynet gap (Foundation ops, not consensus):** Kaspa ~84.6 vs Bitcoin ~97.5 on Skynet (7 Sep 2026) — mostly missing social/GitHub linkage and Community Trust weighting, not weak L1 code (~92 code-security sub-score). Public audit inventory (Y3TI KDX, ScaleBit L2, no rusty-kaspa consensus audit): [`scripts/certik_score_plan.md`](scripts/certik_score_plan.md). Foundation Skynet draft: [`scripts/certik_foundation_submission.md`](scripts/certik_foundation_submission.md). Evidence runner: `powershell -File scripts/integrator_evidence_pack.ps1`. Live tracker: TN10 canvas CertiK section.
 
 ## What will not put Kaspa in the top 10
 

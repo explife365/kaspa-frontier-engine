@@ -2,8 +2,9 @@ use kaspa_frontier_engine::network::{
     self, tn10_tx_url, DEFAULT_DEPOSIT_CONFIRMATIONS, TARGET_BPS,
 };
 use kaspa_frontier_engine::{
-    poll_durable_withdrawal, EngineError, Tn10RestClient, WithdrawalExpectation, WithdrawalLedger,
-    WithdrawalState,
+    finish_gate_options, poll_durable_withdrawal, print_gate_preflight, run_owned_node_gate,
+    try_parse_gate_flag, EngineError, OwnedNodeGateOptions, Tn10RestClient, WithdrawalExpectation,
+    WithdrawalLedger, WithdrawalState,
 };
 use std::env;
 use std::fs;
@@ -14,10 +15,11 @@ struct Options {
     expected: WithdrawalExpectation,
     required: u64,
     database: PathBuf,
+    gate: OwnedNodeGateOptions,
 }
 
 fn usage() -> &'static str {
-    "usage: tn10-withdraw <kaspatest:dest> <txid> <vout> <amount-sompi> [confirmations] [--database PATH]"
+    "usage: tn10-withdraw <kaspatest:dest> <txid> <vout> <amount-sompi> [confirmations] [--database PATH] [--dual] [--min-healthy N] [--require-healthy N] [--max-daa-lag N]"
 }
 
 fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, String> {
@@ -36,6 +38,8 @@ fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, St
         .map_err(|_| "withdrawal amount must be a u64")?;
     let mut required = DEFAULT_DEPOSIT_CONFIRMATIONS;
     let mut database = PathBuf::from(".local/tn10-withdrawals.sqlite");
+    let mut gate = OwnedNodeGateOptions::default();
+    let mut dual = false;
     let remaining: Vec<_> = args.collect();
     let mut index = 0usize;
     if remaining
@@ -49,7 +53,19 @@ fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, St
         index = 1;
     }
     while index < remaining.len() {
-        match remaining[index].as_str() {
+        let argument = remaining[index].as_str();
+        let mut tail = remaining[index + 1..].iter().cloned();
+        if try_parse_gate_flag(&mut gate, &mut dual, argument, &mut tail)? {
+            index += 1;
+            if matches!(
+                argument,
+                "--url" | "--min-healthy" | "--require-healthy" | "--max-daa-lag"
+            ) {
+                index += 1;
+            }
+            continue;
+        }
+        match argument {
             "--database" => {
                 index += 1;
                 database = PathBuf::from(
@@ -63,6 +79,7 @@ fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, St
         }
         index += 1;
     }
+    let gate = finish_gate_options(gate, dual)?;
     Ok(Options {
         expected: WithdrawalExpectation {
             tx_id,
@@ -72,6 +89,7 @@ fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, St
         },
         required,
         database,
+        gate,
     })
 }
 
@@ -110,6 +128,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let wait_secs =
         (((options.required as f64) / TARGET_BPS) * 4.0 + 60.0).clamp(90.0, 600.0) as u64;
     let client = Tn10RestClient::new(network::TESTNET_10_REST)?;
+    if options.gate.min_healthy > 0 {
+        let summary = run_owned_node_gate(
+            &options.gate.urls,
+            &client,
+            options.gate.max_daa_lag,
+            options.gate.min_healthy,
+        )
+        .await?;
+        print_gate_preflight(&summary);
+    }
     let deadline = Instant::now() + Duration::from_secs(wait_secs);
     let mut delay = Duration::from_secs(1);
     let mut last_state = registered.state;

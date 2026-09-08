@@ -3,13 +3,15 @@
 
 use futures_util::{SinkExt, StreamExt};
 use kaspa_frontier_engine::network::{
-    is_valid_testnet_address, require_tn10, TESTNET_10_REST, TN10_WRPC_JSON,
+    is_valid_testnet_address, require_tn10, TESTNET_10_REST,
 };
 use kaspa_frontier_engine::{
-    assess_owned_node, choose_failover_index, decode_notification, encode_notify_utxos_changed,
-    encode_notify_virtual_daa_score_changed, next_failover_index, probe_owned_node,
-    validate_owned_node_urls, validate_subscription_ack, DepositLedger, Tn10RestClient,
-    WrpcDepositProjection, WrpcJournal, WrpcReplayReport,
+    apply_pending_journal_frames, assess_owned_node, decode_notification,
+    encode_notify_utxos_changed, encode_notify_virtual_daa_score_changed, finish_gate_options,
+    owned_node_stage, owned_node_stage_label, print_gate_preflight, probe_owned_node,
+    run_owned_node_gate, select_primary, try_parse_gate_flag, validate_subscription_ack, AddressUtxo, DepositLedger, OwnedNodeAssessment,
+    OwnedNodeGateOptions, Tn10RestClient, WrpcDepositProjection, WrpcJournal, WrpcReplayReport,
+    GATE_DEFAULT_MAX_DAA_LAG,
 };
 use std::collections::HashSet;
 use std::env;
@@ -22,41 +24,34 @@ use tokio_tungstenite::tungstenite::Message;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const MESSAGE_TIMEOUT: Duration = Duration::from_secs(30);
 const RESNAPSHOT_INTERVAL: Duration = Duration::from_secs(60);
-const DEFAULT_MAX_DAA_LAG: u64 = 100;
 
 struct Options {
     addresses: Vec<String>,
-    urls: Vec<String>,
+    gate: OwnedNodeGateOptions,
     rest: String,
     database: PathBuf,
     resnapshot_only: bool,
-    max_daa_lag: u64,
 }
 
 fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, String> {
     let mut addresses = Vec::new();
-    let mut urls = Vec::new();
+    let mut gate = OwnedNodeGateOptions {
+        max_daa_lag: GATE_DEFAULT_MAX_DAA_LAG,
+        ..OwnedNodeGateOptions::default()
+    };
     let mut rest = TESTNET_10_REST.to_string();
     let mut database = PathBuf::from(".local/tn10-wrpc-live.sqlite");
     let mut resnapshot_only = false;
-    let mut max_daa_lag = DEFAULT_MAX_DAA_LAG;
+    let mut dual = false;
     let mut args = arguments.into_iter();
     while let Some(argument) = args.next() {
+        if try_parse_gate_flag(&mut gate, &mut dual, &argument, &mut args)? {
+            continue;
+        }
         match argument.as_str() {
-            "--url" => urls.push(args.next().ok_or("--url needs a value")?),
             "--rest" => rest = args.next().ok_or("--rest needs a value")?,
             "--database" => database = PathBuf::from(args.next().ok_or("--database needs a path")?),
             "--resnapshot-only" => resnapshot_only = true,
-            "--max-daa-lag" => {
-                max_daa_lag = args
-                    .next()
-                    .ok_or("--max-daa-lag needs a value")?
-                    .parse()
-                    .map_err(|_| "--max-daa-lag must be an integer")?;
-                if !(1..=100_000).contains(&max_daa_lag) {
-                    return Err("--max-daa-lag must be 1-100000".into());
-                }
-            }
             _ if argument.starts_with('-') => return Err(format!("unknown flag {argument}")),
             _ => addresses.push(argument),
         }
@@ -76,34 +71,38 @@ fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, St
             return Err(format!("duplicate watched address {address}"));
         }
     }
-    if urls.is_empty() {
-        urls.push(format!("ws://127.0.0.1:{TN10_WRPC_JSON}"));
-    }
-    validate_owned_node_urls(&urls).map_err(|error| error.to_string())?;
+    let gate = finish_gate_options(gate, dual)?;
     Ok(Options {
         addresses,
-        urls,
+        gate,
         rest,
         database,
         resnapshot_only,
-        max_daa_lag,
     })
 }
 
 fn usage() -> &'static str {
-    "usage: tn10-wrpc-live ADDRESS [ADDRESS ...] [--url ws://127.0.0.1:18210]... [--rest HTTPS] [--database PATH] [--max-daa-lag 100] [--resnapshot-only]"
+    "usage: tn10-wrpc-live ADDRESS [ADDRESS ...] [--url ws://127.0.0.1:18210]... [--dual] [--min-healthy N] [--require-healthy N] [--rest HTTPS] [--database PATH] [--max-daa-lag 100] [--resnapshot-only]"
 }
 
-async fn resnapshot(
+async fn fetch_utxo_snapshot(
     rest: &Tn10RestClient,
+    addresses: &[String],
+) -> kaspa_frontier_engine::Result<(u64, Vec<AddressUtxo>)> {
+    let (dag, utxos) = tokio::join!(rest.block_dag_info(), rest.utxos_for_addresses(addresses));
+    let dag = dag?;
+    require_tn10(&dag.network_name)?;
+    Ok((dag.virtual_daa_score, utxos?))
+}
+
+fn apply_fetched_snapshot(
+    virtual_daa: u64,
+    utxos: &[AddressUtxo],
     addresses: &[String],
     projection: &mut WrpcDepositProjection,
     ledger: &mut DepositLedger,
 ) -> kaspa_frontier_engine::Result<()> {
-    let (dag, utxos) = tokio::join!(rest.block_dag_info(), rest.utxos_for_addresses(addresses));
-    let dag = dag?;
-    require_tn10(&dag.network_name)?;
-    let mut snapshot = projection.bootstrap_addresses(dag.virtual_daa_score, &utxos?, addresses)?;
+    let mut snapshot = projection.bootstrap_addresses(virtual_daa, utxos, addresses)?;
     let current: HashSet<_> = snapshot
         .observed
         .iter()
@@ -122,32 +121,57 @@ async fn resnapshot(
     )
 }
 
+async fn resnapshot(
+    rest: &Tn10RestClient,
+    addresses: &[String],
+    projection: &mut WrpcDepositProjection,
+    ledger: &mut DepositLedger,
+) -> kaspa_frontier_engine::Result<()> {
+    let (virtual_daa, utxos) = fetch_utxo_snapshot(rest, addresses).await?;
+    apply_fetched_snapshot(virtual_daa, &utxos, addresses, projection, ledger)
+}
+
+/// rusty-kaspa#939: kaspad cannot filter UtxosChanged by min DAA. Subscribe first,
+/// REST-scan while buffering unread frames, then apply the buffer (not skip it).
+async fn scan_while_subscribed(
+    socket: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+    rest: &Tn10RestClient,
+    addresses: &[String],
+    journal: &mut WrpcJournal,
+    ledger: &mut DepositLedger,
+    projection: &mut WrpcDepositProjection,
+    source: &str,
+) -> Result<WrpcReplayReport, Box<dyn std::error::Error>> {
+    let fetch = fetch_utxo_snapshot(rest, addresses);
+    tokio::pin!(fetch);
+    let (virtual_daa, utxos) = loop {
+        tokio::select! {
+            result = &mut fetch => break result?,
+            raw = receive_text(socket) => {
+                journal.append(source, &raw?)?;
+            }
+        }
+    };
+    apply_fetched_snapshot(virtual_daa, &utxos, addresses, projection, ledger)?;
+    Ok(apply_pending_journal_frames(
+        journal,
+        ledger,
+        projection,
+        source,
+        addresses,
+    )?)
+}
+
 fn replay_pending_after_resnapshot(
     journal: &mut WrpcJournal,
+    ledger: &mut DepositLedger,
     projection: &mut WrpcDepositProjection,
     source: &str,
     addresses: &[String],
 ) -> kaspa_frontier_engine::Result<WrpcReplayReport> {
-    let checkpoint = journal.checkpoint(source)?;
-    let frames = journal.frames(source)?;
-    let mut validated_through = None;
-    for frame in &frames {
-        if frame.sequence <= checkpoint {
-            continue;
-        }
-        let notification = decode_notification(&frame.raw_json)?;
-        let delta = projection.apply_after_resnapshot_addresses(notification, addresses)?;
-        debug_assert!(delta.is_none());
-        validated_through = Some(frame.sequence);
-    }
-    if let Some(sequence) = validated_through {
-        journal.mark_applied_through(source, sequence)?;
-    }
-    Ok(WrpcReplayReport {
-        checkpoint: journal.checkpoint(source)?,
-        frame_count: frames.len(),
-        live_utxos: projection.live_count(),
-    })
+    apply_pending_journal_frames(journal, ledger, projection, source, addresses)
 }
 
 fn apply_live_frame(
@@ -240,14 +264,9 @@ async fn run_connection(
                 daa_ack = true;
             }
             Some(id) => return Err(format!("unexpected wRPC response id {id}").into()),
-            None => apply_live_frame(
-                &raw,
-                journal,
-                ledger,
-                projection,
-                source,
-                &options.addresses,
-            )?,
+            None => {
+                journal.append(source, &raw)?;
+            }
         }
     }
     println!(
@@ -255,17 +274,39 @@ async fn run_connection(
         options.addresses.len(),
         url
     );
+    let replay = scan_while_subscribed(
+        &mut socket,
+        rest,
+        &options.addresses,
+        journal,
+        ledger,
+        projection,
+        source,
+    )
+    .await?;
+    println!(
+        "resnapshot  live={} checkpoint={}",
+        replay.live_utxos, replay.checkpoint
+    );
 
     let mut resnapshot_interval = tokio::time::interval(RESNAPSHOT_INTERVAL);
     resnapshot_interval.tick().await;
     loop {
         tokio::select! {
             _ = resnapshot_interval.tick() => {
-                resnapshot(rest, &options.addresses, projection, ledger).await?;
+                let replay = scan_while_subscribed(
+                    &mut socket,
+                    rest,
+                    &options.addresses,
+                    journal,
+                    ledger,
+                    projection,
+                    source,
+                )
+                .await?;
                 println!(
                     "resnapshot  live={} checkpoint={}",
-                    projection.live_count(),
-                    journal.checkpoint(source)?
+                    replay.live_utxos, replay.checkpoint
                 );
             }
             message = tokio::time::timeout(MESSAGE_TIMEOUT, socket.next()) => {
@@ -309,34 +350,57 @@ fn source_for_addresses(addresses: &[String]) -> String {
     format!("owned-node:{}:{hash:016x}", canonical.len())
 }
 
+async fn healthy_replicas(
+    urls: &[String],
+    rest: &Tn10RestClient,
+    max_daa_lag: u64,
+    skip: Option<usize>,
+) -> Result<Vec<(usize, OwnedNodeAssessment)>, Box<dyn std::error::Error>> {
+    let public = rest.block_dag_info().await?;
+    let probes = futures_util::future::join_all(urls.iter().map(|url| probe_owned_node(url))).await;
+    let mut healthy = Vec::new();
+    for (index, probe) in probes.into_iter().enumerate() {
+        if skip == Some(index) {
+            continue;
+        }
+        if let Ok(health) = probe {
+            if let Ok(assessment) =
+                assess_owned_node(&health, public.virtual_daa_score, max_daa_lag)
+            {
+                healthy.push((index, assessment));
+            }
+        }
+    }
+    Ok(healthy)
+}
+
+/// Prefer a healthy replica. If none remain, hold the current index — do not
+/// subscribe to an unsynced or lagged node.
+fn hold_or_select_healthy(
+    current_index: usize,
+    healthy: &[(usize, OwnedNodeAssessment)],
+) -> (usize, bool) {
+    match select_primary(healthy) {
+        Some(index) => (index, true),
+        None => (current_index, false),
+    }
+}
+
+async fn print_selected_node(url: &str) {
+    if let Ok(health) = probe_owned_node(url).await {
+        let stage = owned_node_stage(&health);
+        println!("selected    {} [{}]", url, owned_node_stage_label(stage));
+    }
+}
+
 async fn next_owned_node(
     urls: &[String],
     rest: &Tn10RestClient,
     failed_index: usize,
     max_daa_lag: u64,
 ) -> Result<(usize, bool), Box<dyn std::error::Error>> {
-    let public = rest.block_dag_info().await.ok();
-    let probes = futures_util::future::join_all(urls.iter().map(|url| probe_owned_node(url))).await;
-    let mut healthy = Vec::new();
-    if let Some(public) = public {
-        for (index, probe) in probes.into_iter().enumerate() {
-            if index == failed_index {
-                continue;
-            }
-            if let Ok(health) = probe {
-                if let Ok(assessment) =
-                    assess_owned_node(&health, public.virtual_daa_score, max_daa_lag)
-                {
-                    healthy.push((index, assessment));
-                }
-            }
-        }
-    }
-    let found_healthy = !healthy.is_empty();
-    Ok((
-        choose_failover_index(failed_index, urls.len(), &healthy)?,
-        found_healthy,
-    ))
+    let healthy = healthy_replicas(urls, rest, max_daa_lag, Some(failed_index)).await?;
+    Ok(hold_or_select_healthy(failed_index, &healthy))
 }
 
 #[tokio::main]
@@ -357,13 +421,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     resnapshot(&rest, &options.addresses, &mut projection, &mut ledger).await?;
     let replay = replay_pending_after_resnapshot(
         &mut journal,
+        &mut ledger,
         &mut projection,
         &source,
         &options.addresses,
     )?;
     println!("database    {}", options.database.display());
     println!("addresses   {}", options.addresses.len());
-    println!("owned nodes {}", options.urls.len());
+    println!("owned nodes {}", options.gate.urls.len());
     println!(
         "resnapshot  live={} checkpoint={}",
         replay.live_utxos, replay.checkpoint
@@ -375,11 +440,47 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if options.resnapshot_only {
         return Ok(());
     }
+    if options.gate.min_healthy > 0 {
+        let summary = run_owned_node_gate(
+            &options.gate.urls,
+            &rest,
+            options.gate.max_daa_lag,
+            options.gate.min_healthy,
+        )
+        .await?;
+        print_gate_preflight(&summary);
+    }
 
     let mut delay = Duration::from_secs(1);
-    let mut node_index = 0usize;
+    let mut node_index = loop {
+        match healthy_replicas(
+            &options.gate.urls,
+            &rest,
+            options.gate.max_daa_lag,
+            None,
+        )
+        .await
+        {
+            Ok(healthy) => match select_primary(&healthy) {
+                Some(index) => {
+                    delay = Duration::from_secs(1);
+                    print_selected_node(&options.gate.urls[index]).await;
+                    break index;
+                }
+                None => {
+                    eprintln!(
+                        "owned-node health: no replica within {} DAA; not subscribing",
+                        options.gate.max_daa_lag
+                    );
+                }
+            },
+            Err(error) => eprintln!("owned-node health probe retry required: {error}"),
+        }
+        tokio::time::sleep(delay).await;
+        delay = (delay * 2).min(Duration::from_secs(30));
+    };
     loop {
-        let url = options.urls[node_index].clone();
+        let url = options.gate.urls[node_index].clone();
         println!("connecting  {url}");
         match run_connection(
             &options,
@@ -396,15 +497,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Err(error) => eprintln!("wRPC failover from {url}: {error}"),
         }
         let (next_index, found_healthy) =
-            match next_owned_node(&options.urls, &rest, node_index, options.max_daa_lag).await {
+            match next_owned_node(
+                &options.gate.urls,
+                &rest,
+                node_index,
+                options.gate.max_daa_lag,
+            )
+            .await
+            {
                 Ok(choice) => choice,
                 Err(error) => {
                     eprintln!("owned-node health probe retry required: {error}");
-                    (next_failover_index(node_index, options.urls.len())?, false)
+                    (node_index, false)
                 }
             };
         if found_healthy {
             delay = Duration::from_secs(1);
+            print_selected_node(&options.gate.urls[next_index]).await;
             tokio::time::sleep(Duration::from_millis(250)).await;
         } else {
             tokio::time::sleep(delay).await;
@@ -419,6 +528,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         let replay = match replay_pending_after_resnapshot(
             &mut journal,
+            &mut ledger,
             &mut projection,
             &source,
             &options.addresses,
@@ -469,8 +579,10 @@ mod tests {
         ])
         .unwrap();
         assert!(options.resnapshot_only);
-        assert_eq!(options.urls, vec!["ws://127.0.0.1:18210"]);
-        assert_eq!(options.max_daa_lag, 100);
+        assert_eq!(options.gate.urls, vec!["ws://127.0.0.1:18210"]);
+        let dual = parse_args([ADDRESS.into(), "--dual".into(), "--resnapshot-only".into()]).unwrap();
+        assert_eq!(dual.gate.urls.len(), 2);
+        assert_eq!(options.gate.max_daa_lag, 100);
         assert_eq!(options.addresses, watched());
     }
 
@@ -487,7 +599,7 @@ mod tests {
         .unwrap();
         assert_eq!(options.addresses, vec![ADDRESS, ADDRESS_2]);
         assert_eq!(
-            options.urls,
+            options.gate.urls,
             vec!["ws://127.0.0.1:18211", "ws://127.0.0.1:18210"]
         );
         assert!(parse_args([ADDRESS.into(), ADDRESS.into()]).is_err());
@@ -510,8 +622,27 @@ mod tests {
         assert!(parse_args([ADDRESS.into(), "--max-daa-lag".into(), "0".into()]).is_err());
     }
 
+    fn assessment(behind: u64) -> OwnedNodeAssessment {
+        OwnedNodeAssessment {
+            local_daa: 100 - behind,
+            public_daa: 100,
+            behind_public_daa: behind,
+            server_dag_delta: 0,
+            header_body_gap: 0,
+            connected_peers: 3,
+            ibd_peers: 0,
+        }
+    }
+
     #[test]
-    fn replay_after_resnapshot_treats_already_removed_as_idempotent() {
+    fn live_ingest_skips_unhealthy_and_holds_when_none_remain() {
+        assert_eq!(hold_or_select_healthy(0, &[]), (0, false));
+        let healthy = vec![(0, assessment(9)), (1, assessment(1))];
+        assert_eq!(hold_or_select_healthy(0, &healthy), (1, true));
+    }
+
+    #[test]
+    fn replay_after_resnapshot_applies_buffered_frames_to_ledger() {
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("live.sqlite");
         let mut journal = WrpcJournal::open(&database).unwrap();
@@ -521,13 +652,55 @@ mod tests {
                 .record("live", u64::try_from(index + 1).unwrap(), line)
                 .unwrap();
         }
+        let mut ledger = DepositLedger::open(&database).unwrap();
         let mut projection = WrpcDepositProjection::default();
         projection.bootstrap(160, &[], ADDRESS).unwrap();
-        let report =
-            replay_pending_after_resnapshot(&mut journal, &mut projection, "live", &watched())
-                .unwrap();
+        let report = replay_pending_after_resnapshot(
+            &mut journal,
+            &mut ledger,
+            &mut projection,
+            "live",
+            &watched(),
+        )
+        .unwrap();
         assert_eq!(report.checkpoint, 4);
-        assert_eq!(report.live_utxos, 0);
+        assert!(
+            !ledger.unacknowledged_events().unwrap().is_empty(),
+            "buffered frames must reconcile into the ledger after REST resnapshot"
+        );
+    }
+
+    #[test]
+    fn subscribe_ack_buffer_replays_after_crash_before_scan_apply() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("ack-crash.sqlite");
+        let addresses = watched();
+        let source = source_for_addresses(&addresses);
+        let added = include_str!("../../fixtures/wrpc-utxos-replay.jsonl")
+            .lines()
+            .nth(1)
+            .unwrap();
+        {
+            let mut journal = WrpcJournal::open(&database).unwrap();
+            journal.append(&source, added).unwrap();
+        }
+        let mut journal = WrpcJournal::open(&database).unwrap();
+        let mut ledger = DepositLedger::open(&database).unwrap();
+        let mut projection = WrpcDepositProjection::default();
+        projection.bootstrap(160, &[], ADDRESS).unwrap();
+        let report = replay_pending_after_resnapshot(
+            &mut journal,
+            &mut ledger,
+            &mut projection,
+            &source,
+            &addresses,
+        )
+        .unwrap();
+        assert_eq!(report.checkpoint, 1);
+        assert!(
+            !ledger.unacknowledged_events().unwrap().is_empty(),
+            "subscribe-ack journal append must survive crash before scan apply"
+        );
     }
 
     #[test]

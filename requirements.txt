@@ -1,5 +1,7 @@
 # Reproducible SDK baseline. Covenant broadcasting fails closed because this
-# build still drops computeBudget; upgrade only to a build containing
-# rusty-kaspa PR #1074 and update the conformance test.
+# build still drops computeBudget on to_dict(). Upgrade only after a published
+# wheel includes kaspa-python-sdk#78, then update the conformance test.
+# Do not pip install from git on Windows without SilverScript injection — use published wheels only.
+# rusty-kaspa#1074 is separate (WASM / wallet generator).
 kaspa==2.0.2rc1
 eth-account==0.14.0

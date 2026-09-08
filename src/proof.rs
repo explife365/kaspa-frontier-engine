@@ -1,11 +1,48 @@
 //! On-disk TN10 covenant proof written by examples/silverscript/counter.py.
 
 use crate::error::{EngineError, Result};
-use crate::kascov::KascovCoin;
+use crate::kascov::{KascovClient, KascovCoin};
 use crate::network::{require_tn10, tn10_tx_url};
-use crate::rest::ToccataTx;
+use crate::rest::{Tn10RestClient, ToccataTx};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProofStepReport {
+    pub step: String,
+    pub txid: String,
+    pub found_on_rest: bool,
+    pub version: Option<u32>,
+    pub is_accepted: Option<bool>,
+    pub storage_mass: Option<String>,
+    pub input_covenant_id: Option<String>,
+    pub output_covenant_id: Option<String>,
+    pub explorer: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct KascovProofSummary {
+    pub name: String,
+    pub status: String,
+    pub lineage_complete: bool,
+    pub event_count: u64,
+    pub live_utxos: u64,
+    pub live_value: u64,
+    pub fetched_live_utxos: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProofVerificationReport {
+    pub network: String,
+    pub covenant_id: String,
+    pub funding_address: String,
+    pub complete: bool,
+    pub rest_verified: bool,
+    pub kascov_verified: bool,
+    pub steps: Vec<ProofStepReport>,
+    pub kascov: Option<KascovProofSummary>,
+    pub kascov_url: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CovenantProofStep {
@@ -21,14 +58,48 @@ pub struct CovenantProofStep {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CovenantProof {
+    #[serde(default = "default_proof_app")]
+    pub app: String,
     pub network: String,
     pub explorer: String,
     pub funding_address: String,
     pub steps: Vec<CovenantProofStep>,
+    #[serde(default)]
+    pub unlock_daa: Option<u64>,
+    #[serde(default)]
+    pub allowed_recipient_hash: Option<i64>,
+}
+
+fn default_proof_app() -> String {
+    "counter".into()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProofApp {
+    Counter,
+    TimelockVault,
+    RestrictedSwap,
+}
+
+impl ProofApp {
+    pub fn steps(self) -> &'static [&'static str] {
+        match self {
+            ProofApp::Counter => &["genesis", "add(5)", "subtract(3)"],
+            ProofApp::TimelockVault => &["genesis", "release"],
+            ProofApp::RestrictedSwap => &["genesis", "swap"],
+        }
+    }
+
+    pub fn counts(self) -> &'static [i64] {
+        match self {
+            ProofApp::Counter => &[0, 5, 2],
+            ProofApp::TimelockVault => &[0, 1],
+            ProofApp::RestrictedSwap => &[0, 1],
+        }
+    }
 }
 
 pub const EXPECTED_STEPS: [&str; 3] = ["genesis", "add(5)", "subtract(3)"];
-const EXPECTED_COUNTS: [i64; 3] = [0, 5, 2];
 
 impl CovenantProof {
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self> {
@@ -39,10 +110,28 @@ impl CovenantProof {
         Ok(proof)
     }
 
+    pub fn app_kind(&self) -> ProofApp {
+        match self.app.as_str() {
+            "timelock_vault" => ProofApp::TimelockVault,
+            "restricted_swap" => ProofApp::RestrictedSwap,
+            _ => ProofApp::Counter,
+        }
+    }
+
+    pub fn expected_steps(&self) -> &'static [&'static str] {
+        self.app_kind().steps()
+    }
+
+    pub fn expected_counts(&self) -> &'static [i64] {
+        self.app_kind().counts()
+    }
+
     pub fn validate(&self) -> Result<()> {
         require_tn10(&self.network)?;
+        let expected_steps = self.expected_steps();
+        let expected_counts = self.expected_counts();
         for (i, step) in self.steps.iter().enumerate() {
-            let expected = EXPECTED_STEPS.get(i).copied().unwrap_or("");
+            let expected = expected_steps.get(i).copied().unwrap_or("");
             if expected.is_empty() {
                 return Err(EngineError::Message(format!(
                     "proof has extra step {}",
@@ -55,10 +144,10 @@ impl CovenantProof {
                     step.step
                 )));
             }
-            if step.count != EXPECTED_COUNTS[i] {
+            if step.count != expected_counts[i] {
                 return Err(EngineError::Message(format!(
                     "proof step {} has count {}, expected {}",
-                    step.step, step.count, EXPECTED_COUNTS[i]
+                    step.step, step.count, expected_counts[i]
                 )));
             }
             if step.txid.is_empty() {
@@ -72,7 +161,7 @@ impl CovenantProof {
     }
 
     pub fn is_complete(&self) -> bool {
-        self.steps.len() == EXPECTED_STEPS.len()
+        self.steps.len() == self.expected_steps().len()
     }
 
     pub fn explorer_links(&self) -> Vec<String> {
@@ -266,6 +355,218 @@ impl CovenantProof {
         }
         Ok(())
     }
+
+    pub async fn verify_online(
+        &self,
+        rest: &Tn10RestClient,
+        kascov: &KascovClient,
+    ) -> Result<ProofVerificationReport> {
+        if !self.is_complete() {
+            return Err(EngineError::Message(format!(
+                "proof incomplete: {}/{} steps (need genesis, add(5), subtract(3))",
+                self.steps.len(),
+                self.expected_steps().len()
+            )));
+        }
+        let covenant_id = self.covenant_id()?.to_string();
+        let mut step_reports = Vec::with_capacity(self.steps.len());
+        let mut txs = Vec::with_capacity(self.steps.len());
+        let mut missing = 0usize;
+        for step in &self.steps {
+            match rest.toccata_tx(&step.txid).await? {
+                Some(tx) => {
+                    step_reports.push(ProofStepReport {
+                        step: step.step.clone(),
+                        txid: step.txid.clone(),
+                        found_on_rest: true,
+                        version: Some(tx.version),
+                        is_accepted: Some(tx.is_accepted),
+                        storage_mass: tx
+                            .storage_mass
+                            .map(|mass| mass.to_string()),
+                        input_covenant_id: tx.input_covenant_id().map(str::to_string),
+                        output_covenant_id: tx.output_covenant_id().map(str::to_string),
+                        explorer: step.explorer_url(),
+                    });
+                    txs.push(tx);
+                }
+                None => {
+                    missing += 1;
+                    step_reports.push(ProofStepReport {
+                        step: step.step.clone(),
+                        txid: step.txid.clone(),
+                        found_on_rest: false,
+                        version: None,
+                        is_accepted: None,
+                        storage_mass: None,
+                        input_covenant_id: None,
+                        output_covenant_id: None,
+                        explorer: step.explorer_url(),
+                    });
+                }
+            }
+        }
+        if missing > 0 {
+            return Err(EngineError::Message(format!(
+                "{missing} proof txid(s) not found on TN10 REST"
+            )));
+        }
+        self.verify_rest_txs(&txs)?;
+        let (coin, utxos) = kascov.snapshot(&covenant_id).await?;
+        self.verify_kascov(&coin)?;
+        Ok(self.build_report(covenant_id, step_reports, true, true, coin, utxos.len(), kascov))
+    }
+
+    /// Live kascov verification when TN10 REST no longer serves historical txids.
+    /// REST steps are best-effort; success requires kascov lineage + live_utxos only.
+    pub async fn verify_kascov_online(
+        &self,
+        rest: &Tn10RestClient,
+        kascov: &KascovClient,
+    ) -> Result<ProofVerificationReport> {
+        if !self.is_complete() {
+            return Err(EngineError::Message(format!(
+                "proof incomplete: {}/{} steps (need genesis, add(5), subtract(3))",
+                self.steps.len(),
+                self.expected_steps().len()
+            )));
+        }
+        let covenant_id = self.covenant_id()?.to_string();
+        let mut step_reports = Vec::with_capacity(self.steps.len());
+        let mut txs = Vec::new();
+        for step in &self.steps {
+            match rest.toccata_tx(&step.txid).await? {
+                Some(tx) => {
+                    step_reports.push(ProofStepReport {
+                        step: step.step.clone(),
+                        txid: step.txid.clone(),
+                        found_on_rest: true,
+                        version: Some(tx.version),
+                        is_accepted: Some(tx.is_accepted),
+                        storage_mass: tx.storage_mass.map(|mass| mass.to_string()),
+                        input_covenant_id: tx.input_covenant_id().map(str::to_string),
+                        output_covenant_id: tx.output_covenant_id().map(str::to_string),
+                        explorer: step.explorer_url(),
+                    });
+                    txs.push(tx);
+                }
+                None => {
+                    step_reports.push(ProofStepReport {
+                        step: step.step.clone(),
+                        txid: step.txid.clone(),
+                        found_on_rest: false,
+                        version: None,
+                        is_accepted: None,
+                        storage_mass: None,
+                        input_covenant_id: None,
+                        output_covenant_id: None,
+                        explorer: step.explorer_url(),
+                    });
+                }
+            }
+        }
+        let rest_verified = if txs.len() == self.steps.len() {
+            self.verify_rest_txs(&txs).is_ok()
+        } else {
+            false
+        };
+        let (coin, utxos) = kascov.snapshot(&covenant_id).await?;
+        self.verify_kascov(&coin)?;
+        Ok(self.build_report(
+            covenant_id,
+            step_reports,
+            rest_verified,
+            true,
+            coin,
+            utxos.len(),
+            kascov,
+        ))
+    }
+
+    fn build_report(
+        &self,
+        covenant_id: String,
+        steps: Vec<ProofStepReport>,
+        rest_verified: bool,
+        kascov_verified: bool,
+        coin: KascovCoin,
+        fetched_live_utxos: usize,
+        kascov: &KascovClient,
+    ) -> ProofVerificationReport {
+        ProofVerificationReport {
+            network: self.network.clone(),
+            covenant_id: covenant_id.clone(),
+            funding_address: self.funding_address.clone(),
+            complete: true,
+            rest_verified,
+            kascov_verified,
+            steps,
+            kascov: Some(KascovProofSummary {
+                name: coin.name.clone(),
+                status: coin.status.clone(),
+                lineage_complete: coin.lineage_complete,
+                event_count: coin.event_count,
+                live_utxos: coin.live_utxos,
+                live_value: coin.live_value,
+                fetched_live_utxos,
+            }),
+            kascov_url: kascov.coin_url(&covenant_id),
+        }
+    }
+
+    /// Verify against checked-in REST + kascov fixture snapshots (no network).
+    pub fn verify_offline_fixture(
+        &self,
+        txs: &[ToccataTx],
+        coin: &KascovCoin,
+        kascov_url: &str,
+    ) -> Result<ProofVerificationReport> {
+        if !self.is_complete() {
+            return Err(EngineError::Message(format!(
+                "proof incomplete: {}/{} steps (need genesis, add(5), subtract(3))",
+                self.steps.len(),
+                self.expected_steps().len()
+            )));
+        }
+        self.verify_rest_txs(txs)?;
+        self.verify_kascov(coin)?;
+        let covenant_id = self.covenant_id()?.to_string();
+        let steps = self
+            .steps
+            .iter()
+            .zip(txs.iter())
+            .map(|(step, tx)| ProofStepReport {
+                step: step.step.clone(),
+                txid: step.txid.clone(),
+                found_on_rest: true,
+                version: Some(tx.version),
+                is_accepted: Some(tx.is_accepted),
+                storage_mass: tx.storage_mass.map(|mass| mass.to_string()),
+                input_covenant_id: tx.input_covenant_id().map(str::to_string),
+                output_covenant_id: tx.output_covenant_id().map(str::to_string),
+                explorer: step.explorer_url(),
+            })
+            .collect();
+        Ok(ProofVerificationReport {
+            network: self.network.clone(),
+            covenant_id,
+            funding_address: self.funding_address.clone(),
+            complete: true,
+            rest_verified: true,
+            kascov_verified: true,
+            steps,
+            kascov: Some(KascovProofSummary {
+                name: coin.name.clone(),
+                status: coin.status.clone(),
+                lineage_complete: coin.lineage_complete,
+                event_count: coin.event_count,
+                live_utxos: coin.live_utxos,
+                live_value: coin.live_value,
+                fetched_live_utxos: coin.utxos.len(),
+            }),
+            kascov_url: kascov_url.to_string(),
+        })
+    }
 }
 
 impl CovenantProofStep {
@@ -284,6 +585,9 @@ mod tests {
     #[test]
     fn validates_partial_and_complete() {
         let mut proof = CovenantProof {
+            app: "counter".into(),
+            unlock_daa: None,
+            allowed_recipient_hash: None,
             network: "testnet-10".into(),
             explorer: "https://explorer-tn10.kaspa.org".into(),
             funding_address: "kaspatest:qq".into(),
@@ -330,6 +634,9 @@ mod tests {
     #[test]
     fn rejects_wrong_order() {
         let proof = CovenantProof {
+            app: "counter".into(),
+            unlock_daa: None,
+            allowed_recipient_hash: None,
             network: "testnet-10".into(),
             explorer: "https://explorer-tn10.kaspa.org".into(),
             funding_address: "kaspatest:qq".into(),
@@ -377,6 +684,9 @@ mod tests {
     #[test]
     fn rest_lineage_requires_v1_accepted_and_covenant_id() {
         let proof = CovenantProof {
+            app: "counter".into(),
+            unlock_daa: None,
+            allowed_recipient_hash: None,
             network: "testnet-10".into(),
             explorer: "https://explorer-tn10.kaspa.org".into(),
             funding_address: "kaspatest:qq".into(),
@@ -431,6 +741,9 @@ mod tests {
     #[test]
     fn rest_lineage_uses_selected_output_and_nonzero_authorizing_input() {
         let proof = CovenantProof {
+            app: "counter".into(),
+            unlock_daa: None,
+            allowed_recipient_hash: None,
             network: "testnet-10".into(),
             explorer: "https://explorer-tn10.kaspa.org".into(),
             funding_address: "kaspatest:qq".into(),
@@ -504,6 +817,9 @@ mod tests {
     #[test]
     fn kascov_must_match_proof_txids() {
         let proof = CovenantProof {
+            app: "counter".into(),
+            unlock_daa: None,
+            allowed_recipient_hash: None,
             network: "testnet-10".into(),
             explorer: "https://explorer-tn10.kaspa.org".into(),
             funding_address: "kaspatest:qq".into(),
@@ -555,6 +871,72 @@ mod tests {
             tx_index: None,
         });
         assert!(proof.verify_kascov(&extra).is_err());
+    }
+
+    #[test]
+    fn timelock_vault_profile_validates_two_steps() {
+        let proof = CovenantProof {
+            app: "timelock_vault".into(),
+            unlock_daa: Some(1_000_000),
+            allowed_recipient_hash: None,
+            network: "testnet-10".into(),
+            explorer: "https://explorer-tn10.kaspa.org".into(),
+            funding_address: "kaspatest:qq".into(),
+            steps: vec![
+                CovenantProofStep {
+                    step: "genesis".into(),
+                    count: 0,
+                    txid: "aa".into(),
+                    covenant_id: "cc".into(),
+                    output_index: Some(0),
+                    explorer: None,
+                },
+                CovenantProofStep {
+                    step: "release".into(),
+                    count: 1,
+                    txid: "bb".into(),
+                    covenant_id: "cc".into(),
+                    output_index: Some(0),
+                    explorer: None,
+                },
+            ],
+        };
+        proof.validate().unwrap();
+        assert!(proof.is_complete());
+        assert_eq!(proof.app_kind(), ProofApp::TimelockVault);
+    }
+
+    #[test]
+    fn restricted_swap_profile_validates_two_steps() {
+        let proof = CovenantProof {
+            app: "restricted_swap".into(),
+            unlock_daa: None,
+            allowed_recipient_hash: Some(0x5357_4150),
+            network: "testnet-10".into(),
+            explorer: "https://explorer-tn10.kaspa.org".into(),
+            funding_address: "kaspatest:qq".into(),
+            steps: vec![
+                CovenantProofStep {
+                    step: "genesis".into(),
+                    count: 0,
+                    txid: "aa".into(),
+                    covenant_id: "cc".into(),
+                    output_index: Some(0),
+                    explorer: None,
+                },
+                CovenantProofStep {
+                    step: "swap".into(),
+                    count: 1,
+                    txid: "bb".into(),
+                    covenant_id: "cc".into(),
+                    output_index: Some(0),
+                    explorer: None,
+                },
+            ],
+        };
+        proof.validate().unwrap();
+        assert!(proof.is_complete());
+        assert_eq!(proof.app_kind(), ProofApp::RestrictedSwap);
     }
 
     #[test]

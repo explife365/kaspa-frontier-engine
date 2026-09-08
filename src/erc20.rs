@@ -1,11 +1,14 @@
 //! Generic ERC-20 `eth_call` helpers for Galleon / Kasplex L2.
 //!
-//! Galleon `USDC` is Igra's test token (`GALLEON_TEST_USDC`). It is **not**
-//! Circle-issued mainnet USDC and is not redeemable.
+//! Galleon `USDC` is Igra's test token (`GALLEON_TEST_USDC`). Igra mainnet
+//! `USDC` is Hyperlane HypSynthetic (`IGRA_MAINNET_HYPERLANE_USDC`). Neither
+//! is Circle-issued cash USDC.
 
 use crate::error::{EngineError, Result};
 use crate::l2::EvmRpcClient;
-use crate::network::GALLEON_TEST_USDC as GALLEON_USDC;
+use crate::network::{
+    GALLEON_TEST_USDC as GALLEON_USDC, IGRA_MAINNET_HYPERLANE_USDC as IGRA_HYPERLANE_USDC,
+};
 
 /// `decimals()`
 pub const SELECTOR_DECIMALS: &str = "0x313ce567";
@@ -29,7 +32,11 @@ impl Erc20Meta {
         self.address.eq_ignore_ascii_case(GALLEON_USDC)
     }
 
-    /// Circle does not list Igra Galleon. Do not treat this as cash USDC.
+    pub fn is_hyperlane_igra_usdc(&self) -> bool {
+        self.address.eq_ignore_ascii_case(IGRA_HYPERLANE_USDC)
+    }
+
+    /// Circle does not list Igra. Do not treat Galleon or Hyperlane USDC as cash.
     pub fn is_circle_issued(&self) -> bool {
         false
     }
@@ -164,6 +171,10 @@ impl EvmRpcClient {
     pub async fn galleon_test_usdc_meta(&self) -> Result<Erc20Meta> {
         self.erc20_meta(GALLEON_USDC).await
     }
+
+    pub async fn igra_hyperlane_usdc_meta(&self) -> Result<Erc20Meta> {
+        self.erc20_meta(IGRA_HYPERLANE_USDC).await
+    }
 }
 
 #[cfg(test)]
@@ -191,6 +202,20 @@ mod tests {
         assert_eq!(decode_uint256("0x06").unwrap(), 6);
         assert!(!Erc20Meta {
             address: GALLEON_USDC.into(),
+            name: "USD Coin".into(),
+            symbol: "USDC".into(),
+            decimals: 6,
+        }
+        .is_circle_issued());
+        assert!(Erc20Meta {
+            address: IGRA_HYPERLANE_USDC.into(),
+            name: "USD Coin".into(),
+            symbol: "USDC".into(),
+            decimals: 6,
+        }
+        .is_hyperlane_igra_usdc());
+        assert!(!Erc20Meta {
+            address: IGRA_HYPERLANE_USDC.into(),
             name: "USD Coin".into(),
             symbol: "USDC".into(),
             decimals: 6,

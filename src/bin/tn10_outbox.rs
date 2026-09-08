@@ -1,9 +1,12 @@
 //! Durable deposit outbox inspection and at-least-once webhook delivery.
 
+use kaspa_frontier_engine::network::TESTNET_10_REST;
 use kaspa_frontier_engine::{
-    ClaimedLedgerEvent, DeliveryFailureOutcome, DepositLedger, LedgerEvent,
+    finish_gate_options, run_owned_node_gate, try_parse_gate_flag, print_gate_preflight,
+    ClaimedLedgerEvent, DeliveryFailureOutcome, DepositLedger, LedgerEvent, OwnedNodeGateOptions,
+    Tn10RestClient,
 };
-use reqwest::{Client, Url};
+use reqwest::{redirect::Policy, Client, Url};
 use serde::Serialize;
 use std::env;
 use std::path::PathBuf;
@@ -45,6 +48,7 @@ struct TlsClientAuth {
 struct Options {
     database: PathBuf,
     command: Command,
+    gate: OwnedNodeGateOptions,
 }
 
 #[derive(Serialize)]
@@ -69,7 +73,7 @@ struct DeliveryPolicy {
 }
 
 fn usage() -> &'static str {
-    "usage: tn10-outbox <list|dead|ack ID|requeue ID|deliver URL> [--database PATH] [--limit N] [--max-attempts N] [--retry-base-seconds N] [--retry-max-seconds N] [--tls-ca PEM] [--tls-cert PEM] [--tls-key PEM]"
+    "usage: tn10-outbox <list|dead|ack ID|requeue ID|deliver URL> [--database PATH] [--limit N] [--max-attempts N] [--retry-base-seconds N] [--retry-max-seconds N] [--dual] [--min-healthy N] [--require-healthy N] [--max-daa-lag N] [--tls-ca PEM] [--tls-cert PEM] [--tls-key PEM]"
 }
 
 fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, String> {
@@ -114,10 +118,15 @@ fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, St
         _ => return Err(usage().into()),
     };
     let mut database = PathBuf::from(DEFAULT_DATABASE);
+    let mut gate = OwnedNodeGateOptions::default();
+    let mut dual = false;
     let mut tls_ca = None;
     let mut tls_cert = None;
     let mut tls_key = None;
     while let Some(argument) = args.next() {
+        if try_parse_gate_flag(&mut gate, &mut dual, &argument, &mut args)? {
+            continue;
+        }
         match argument.as_str() {
             "--database" => database = PathBuf::from(args.next().ok_or("--database needs a path")?),
             "--tls-ca" => tls_ca = Some(PathBuf::from(args.next().ok_or("--tls-ca needs a path")?)),
@@ -209,10 +218,21 @@ fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, St
             }
             _ => return Err("mTLS requires --tls-ca, --tls-cert, and --tls-key together".into()),
         }
+        if endpoint.scheme() == "https" && !webhook_host_is_loopback(endpoint) && tls.is_none() {
+            return Err(
+                "non-loopback HTTPS webhook delivery requires mTLS (--tls-ca --tls-cert --tls-key)"
+                    .into(),
+            );
+        }
     } else if tls_ca.is_some() || tls_cert.is_some() || tls_key.is_some() {
         return Err("TLS client flags are valid only with deliver".into());
     }
-    Ok(Options { database, command })
+    let gate = finish_gate_options(gate, dual)?;
+    Ok(Options {
+        database,
+        command,
+        gate,
+    })
 }
 
 fn parse_retry_seconds(raw: String, flag: &str) -> Result<u64, String> {
@@ -223,6 +243,10 @@ fn parse_retry_seconds(raw: String, flag: &str) -> Result<u64, String> {
         return Err(format!("{flag} must be 1-86400"));
     }
     Ok(value)
+}
+
+fn webhook_host_is_loopback(endpoint: &Url) -> bool {
+    matches!(endpoint.host_str(), Some("127.0.0.1" | "::1" | "localhost"))
 }
 
 fn safe_endpoint(raw: &str) -> Result<Url, String> {
@@ -236,8 +260,7 @@ fn safe_endpoint(raw: &str) -> Result<Url, String> {
     match endpoint.scheme() {
         "https" => {}
         "http" => {
-            let loopback = matches!(endpoint.host_str(), Some("127.0.0.1" | "::1" | "localhost"));
-            if !loopback {
+            if !webhook_host_is_loopback(&endpoint) {
                 return Err("cleartext webhook delivery is restricted to loopback".into());
             }
         }
@@ -297,6 +320,7 @@ async fn deliver(
     let mut builder = Client::builder()
         .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(15))
+        .redirect(Policy::none())
         .user_agent("kaspa-frontier-engine/tn10-outbox");
     if let Some(tls) = tls {
         let ca = reqwest::Certificate::from_pem(&std::fs::read(&tls.ca)?)?;
@@ -416,6 +440,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             retry_max_seconds,
             tls,
         } => {
+            if options.gate.min_healthy > 0 {
+                let rest = Tn10RestClient::new(TESTNET_10_REST)?;
+                let summary = run_owned_node_gate(
+                    &options.gate.urls,
+                    &rest,
+                    options.gate.max_daa_lag,
+                    options.gate.min_healthy,
+                )
+                .await?;
+                print_gate_preflight(&summary);
+            }
             let report = deliver(
                 &mut ledger,
                 &endpoint,
@@ -464,7 +499,7 @@ mod tests {
     fn parses_bounded_delivery_options() {
         let options = parse_args([
             "deliver".into(),
-            "https://custody.example/events".into(),
+            "https://127.0.0.1:18320/kaspa-events".into(),
             "--limit".into(),
             "5".into(),
             "--database".into(),
@@ -476,7 +511,7 @@ mod tests {
         assert!(parse_args(["list".into(), "--limit".into(), "1".into()]).is_err());
         let options = parse_args([
             "deliver".into(),
-            "https://custody.example/events".into(),
+            "https://127.0.0.1:18320/kaspa-events".into(),
             "--max-attempts".into(),
             "7".into(),
             "--retry-base-seconds".into(),
@@ -503,6 +538,18 @@ mod tests {
             "30".into(),
         ])
         .is_err());
+        assert!(parse_args(["deliver".into(), "https://custody.example/events".into()]).is_err());
+        assert!(parse_args([
+            "deliver".into(),
+            "https://custody.example/events".into(),
+            "--tls-ca".into(),
+            "ca.pem".into(),
+            "--tls-cert".into(),
+            "client.pem".into(),
+            "--tls-key".into(),
+            "client.key".into(),
+        ])
+        .is_ok());
         assert_eq!(retry_delay_seconds(1, 5, 300), 5);
         assert_eq!(retry_delay_seconds(3, 5, 300), 20);
         assert_eq!(retry_delay_seconds(100, 5, 300), 300);

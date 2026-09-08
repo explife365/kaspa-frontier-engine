@@ -25,6 +25,13 @@ pub const GALLEON_TEST_USDC: &str = "0xFd89676CBb3D2742c565aFC02986370ef4ba667A"
 pub const GALLEON_GTEST: &str = "0xbc5e27ab3ce2edb243593cda2437e5b30e0d5d7d";
 /// Circle has not published a USDC contract for Igra Galleon (chain 38836).
 pub const CIRCLE_USDC_ON_GALLEON: Option<&str> = None;
+/// Igra mainnet EVM (chain 38833). Not kaspad. Not TN10.
+pub const IGRA_MAINNET_RPC: &str = "https://rpc.igralabs.com:8545";
+pub const IGRA_MAINNET_CHAIN_ID: u64 = 38_833;
+/// Hyperlane HypSynthetic USDC on Igra mainnet. Bridged collateral, not Circle-issued.
+pub const IGRA_MAINNET_HYPERLANE_USDC: &str = "0xA5b8BF902b2844dA17d4506cc827F7F1681735E7";
+/// Circle has not published a native USDC mint for Igra mainnet (chain 38833).
+pub const CIRCLE_USDC_ON_IGRA_MAINNET: Option<&str> = None;
 /// Wrapped iKAS (WETH9-style) on Galleon. Not kaspad. Not USD.
 pub const GALLEON_WRAPPED_IKAS: Option<&str> = Some("0x7331b0a33ac9aa92f506f057bfaa049ea133f77f");
 /// Local JSON-RPC shim (REST + kascov). Not kaspad. Default bind.
@@ -52,7 +59,21 @@ pub const DEV_DONATION_ADDRESS: &str =
 pub const TN10_GRPC: u16 = 16210;
 pub const TN10_WRPC_BORSH: u16 = 17210;
 pub const TN10_WRPC_JSON: u16 = 18210;
+/// host02 TN10 replica forwarded to loopback (see scripts/tn10_host02_tunnel.ps1).
+pub const TN10_WRPC_REPLICA_JSON: u16 = 28210;
 pub const TN10_P2P: u16 = 16211;
+
+pub fn loopback_wrpc_url(port: u16) -> String {
+    format!("ws://127.0.0.1:{port}")
+}
+
+/// Default laptop + host02-tunnel replica URLs for N-of-M rehearsal.
+pub fn default_dual_owned_node_urls() -> Vec<String> {
+    vec![
+        loopback_wrpc_url(TN10_WRPC_JSON),
+        loopback_wrpc_url(TN10_WRPC_REPLICA_JSON),
+    ]
+}
 
 /// Crescendo / current mainnet and TN10 target. DAGKnight is not activated.
 pub const TARGET_BPS: f64 = 10.0;
@@ -78,7 +99,7 @@ pub enum AddressNetwork {
 }
 
 pub fn local_kaspad_cmd() -> &'static str {
-    "kaspad --testnet --netsuffix=10 --utxoindex --rpclisten-json=default"
+    r#"kaspad --testnet --netsuffix=10 --utxoindex --disable-upnp --rpclisten=127.0.0.1:16210 --rpclisten-json=127.0.0.1:18210 --appdir %LOCALAPPDATA%\kaspa\tn10"#
 }
 
 /// `kaspatest:` starts with `kaspa:`, so testnet must be matched first.
@@ -250,6 +271,9 @@ mod tests {
         assert!(!is_unsupported_testnet_name("kaspa-testnet-10"));
         assert!(local_kaspad_cmd().contains("--netsuffix=10"));
         assert!(!local_kaspad_cmd().contains("--netsuffix=12"));
+        assert!(local_kaspad_cmd().contains("127.0.0.1:18210"));
+        assert!(local_kaspad_cmd().contains(r"%LOCALAPPDATA%\kaspa\tn10"));
+        assert!(!local_kaspad_cmd().contains("rusty-kaspa"));
         assert!(TN12_BPS_NOTE.contains("not 100 BPS"));
         assert!(TN12_BPS_NOTE.contains("covenants"));
         assert!(TN12_BPS_NOTE.contains("TPS is not BPS"));
@@ -300,6 +324,17 @@ mod tests {
             GALLEON_TEST_USDC.to_ascii_lowercase()
         );
         assert!(CIRCLE_USDC_ON_GALLEON.is_none());
+        assert_eq!(IGRA_MAINNET_CHAIN_ID, 38_833);
+        assert!(IGRA_MAINNET_RPC.starts_with("https://"));
+        assert_eq!(
+            IGRA_MAINNET_HYPERLANE_USDC,
+            "0xA5b8BF902b2844dA17d4506cc827F7F1681735E7"
+        );
+        assert!(CIRCLE_USDC_ON_IGRA_MAINNET.is_none());
+        assert_ne!(
+            IGRA_MAINNET_HYPERLANE_USDC.to_ascii_lowercase(),
+            GALLEON_TEST_USDC.to_ascii_lowercase()
+        );
         assert_eq!(
             GALLEON_WRAPPED_IKAS,
             Some("0x7331b0a33ac9aa92f506f057bfaa049ea133f77f")
@@ -310,5 +345,13 @@ mod tests {
         assert_eq!(GALLEON_TXID_PREFIX, "97b4");
         assert_eq!(KASPLEX_FRONTIER_TICK, "TMBMN");
         assert_eq!(KASPLEX_DEPLOY_FEE_SOMPI, 1_000 * SOMPI_PER_KAS);
+    }
+
+    #[test]
+    fn dual_owned_node_urls_use_loopback_ports() {
+        let urls = default_dual_owned_node_urls();
+        assert_eq!(urls.len(), 2);
+        assert_eq!(urls[0], loopback_wrpc_url(TN10_WRPC_JSON));
+        assert_eq!(urls[1], loopback_wrpc_url(TN10_WRPC_REPLICA_JSON));
     }
 }

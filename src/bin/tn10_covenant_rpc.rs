@@ -51,8 +51,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("kascov             {KASCOV_TN10}");
     println!("REST               {TESTNET_10_REST}");
     println!(
-        "Circle USDC        not listed on Galleon {}",
-        network::GALLEON_TEST_USDC
+        "Circle USDC        not listed on Galleon {} or Igra mainnet {}",
+        network::GALLEON_TEST_USDC,
+        network::IGRA_MAINNET_HYPERLANE_USDC
     );
     println!("gTEST              {}", network::GALLEON_GTEST);
     println!("methods            getInfo getBlockDagInfo getUtxosByAddresses getUtxosByCovenantId getCovenant");

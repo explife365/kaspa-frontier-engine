@@ -1,0 +1,44 @@
+This is independent TN10 integrator field notes. It is **not** a KIP, not a consensus patch, and not an activation argument.
+
+Live L1 is GHOSTDAG @ 10 BPS with k=18 (Crescendo). [KIP-2 / DAGKnight](https://github.com/kaspanet/kips/blob/master/kip-0002.md) remains **Status: Proposed**.
+
+## 1. Toccata is on-chain; wallet/SDK lag is not a consensus bug
+
+kaspad already accepts v1 txs (`mass`, `compute_budget`, output `covenant_id`). Mainnet covenant count is far below TN10. That gap looks like product/indexer/wallet decode, not node rejection.
+
+Pinned PyPI `kaspa==2.0.2rc1` still drops `computeBudget` on serialize (`TransactionInput.to_dict()`). [rusty-kaspa#1074](https://github.com/kaspanet/rusty-kaspa/pull/1074) is WASM/generator; the Python `convert.rs` fix is [kaspa-python-sdk#78](https://github.com/kaspanet/kaspa-python-sdk/pull/78). Resume depends on a published SDK wheel, not on an unofficial fork.
+
+## 2. `getUtxosByCovenantId` is still missing on kaspad
+
+Community indexer: https://kascov.io/data/testnet-10/c/<id>.json
+
+A local JSON-RPC shim over public REST + kascov can paper over this for rehearsal. It does not add the method to kaspad. Integrators would rather have it on the node.
+
+## 3. Delay-window occupancy vs live k (not DAGKnight)
+
+In-process virtual miners, Poisson-like emits, occupancy of a ~1s delay window vs **live GHOSTDAG k=18**. Not kaspad. Not a DAGKnight implementation.
+
+| Target | Max occupancy in window | P(occupancy > 18) | k=18 covers? |
+| --- | ---: | ---: | --- |
+| 10 BPS (live) | 14 | 0 | yes |
+| 100 BPS (lore) | 115 | ~0.99 | no |
+
+SAT packing of `bps × L ≤ k`: 10/k18 SAT, 100/k18 UNSAT, 100/k100 SAT. Delay jitter overshoots that product: at 100 BPS, k=100 still overflowed (max 115); in this toy k=128 covered.
+
+So 100 BPS does not fit today's k, and “k = BPS” is not enough if delay varies. A different k (research) or DK (KIP-2) is Core's path. This is not a homemade testnet.
+
+## 4. Toy SAT on a finite delay encoding (not a KIP-2 proof)
+
+Encoding of: honest anticone pair with `|t(u)-t(v)| ≤ d` ⇒ `A(.) ≤ f`.
+
+- Stated `f=2d` has a checkable SAT counterexample except `n=6 d=2`.
+- Finite "safe" `f` at these sizes is ~`n-2` — tracks graph size, not delay — not a KIP-2 invariant.
+- Glucose4, Cadical195, and Minisat22 agree on the same CNFs; SAT models were clause-checked.
+
+That is a statement about *this encoding at these n*. A KIP-2 verdict is: applied research in the KIP, DK in rusty-kaspa, staged nets, `kip-0002.md` leaving Proposed, then a mainnet HF. Independent SAT does not mint that.
+
+## 5. Circle USDC is not on Igra Galleon
+
+Circle's published USDC list has no chain 38836. Galleon has an Igra *test* USDC (USD Coin / 6 decimals). Not Circle-issued, not redeemable. L1 has no EVM; stables live on L2 when Circle actually lists.
+
+Happy to answer questions here. No node RPC/P2P ports or private rehearsal hosts in this note.
