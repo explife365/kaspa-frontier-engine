@@ -74,6 +74,14 @@ fn default_proof_app() -> String {
     "counter".into()
 }
 
+fn rest_txid(value: &serde_json::Value) -> Option<String> {
+    value
+        .get("transaction_id")
+        .or_else(|| value.get("transactionId"))
+        .and_then(|field| field.as_str())
+        .map(str::to_string)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProofApp {
     Counter,
@@ -426,12 +434,14 @@ impl CovenantProof {
     }
 
     /// Fetch live REST + kascov JSON for offline `--offline` replay after broadcast.
+    /// When TN10 REST prunes historical txids, reuses rows from an existing REST fixture.
     pub async fn capture_fixture_files(
         &self,
         proof_path: &Path,
         rest: &Tn10RestClient,
         kascov: &KascovClient,
     ) -> Result<(std::path::PathBuf, std::path::PathBuf)> {
+        use std::collections::HashMap;
         use std::path::PathBuf;
         if !self.is_complete() {
             return Err(EngineError::Message(format!(
@@ -440,18 +450,6 @@ impl CovenantProof {
                 self.expected_steps().len()
             )));
         }
-        let mut txs = Vec::with_capacity(self.steps.len());
-        for step in &self.steps {
-            let raw = rest.transaction(&step.txid).await?.ok_or_else(|| {
-                EngineError::Message(format!(
-                    "REST missing txid {} — wait for indexer or verify with --kascov-only",
-                    step.txid
-                ))
-            })?;
-            txs.push(raw);
-        }
-        let covenant_id = self.covenant_id()?;
-        let coin = kascov.coin(&covenant_id).await?;
         let prefix = self.app_kind().fixture_prefix();
         let fixture_dir = proof_path
             .parent()
@@ -460,6 +458,51 @@ impl CovenantProof {
             .unwrap_or_else(|| PathBuf::from("fixtures"));
         let rest_path = fixture_dir.join(format!("{prefix}-rest.json"));
         let kascov_path = fixture_dir.join(format!("{prefix}-kascov.json"));
+        let cached_rest: Vec<serde_json::Value> = if rest_path.is_file() {
+            serde_json::from_str(&std::fs::read_to_string(&rest_path).map_err(|error| {
+                EngineError::Message(format!("read {}: {error}", rest_path.display()))
+            })?)
+            .map_err(|error| {
+                EngineError::Message(format!(
+                    "parse cached REST fixture {}: {error}",
+                    rest_path.display()
+                ))
+            })?
+        } else {
+            Vec::new()
+        };
+        let cached_by_txid: HashMap<String, serde_json::Value> = cached_rest
+            .into_iter()
+            .filter_map(|row| rest_txid(&row).map(|txid| (txid, row)))
+            .collect();
+        let mut txs = Vec::with_capacity(self.steps.len());
+        let mut reused = 0usize;
+        for step in &self.steps {
+            match rest.transaction(&step.txid).await? {
+                Some(raw) => txs.push(raw),
+                None => match cached_by_txid.get(&step.txid) {
+                    Some(row) => {
+                        txs.push(row.clone());
+                        reused += 1;
+                    }
+                    None => {
+                        return Err(EngineError::Message(format!(
+                            "REST missing txid {} and no cached row in {}",
+                            step.txid,
+                            rest_path.display()
+                        )));
+                    }
+                },
+            }
+        }
+        if reused > 0 {
+            tracing::info!(
+                "capture_fixture_files reused {reused} pruned REST txid(s) from {}",
+                rest_path.display()
+            );
+        }
+        let covenant_id = self.covenant_id()?;
+        let coin = kascov.coin(&covenant_id).await?;
         std::fs::write(&rest_path, serde_json::to_string_pretty(&txs)?).map_err(|error| {
             EngineError::Message(format!("write {}: {error}", rest_path.display()))
         })?;

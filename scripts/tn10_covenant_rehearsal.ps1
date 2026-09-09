@@ -8,7 +8,11 @@ $proof = Join-Path $root "fixtures\tn10-counter-proof.json"
 Push-Location $root
 try {
     Write-Host "=== SilverScript compile + SDK computeBudget gate ==="
-    python "$root\scripts\tn10_sdk_gate.py" --json
+    if ($env:TN10_SDK_DEV_PATCH -eq "1") {
+        python "$root\scripts\tn10_sdk_gate.py" --dev --json
+    } else {
+        python "$root\scripts\tn10_sdk_gate.py" --json
+    }
     if ($LASTEXITCODE -eq 0) {
         Write-Host "SDK gate green - covenant broadcast may proceed"
     }

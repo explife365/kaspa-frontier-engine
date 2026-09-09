@@ -376,6 +376,9 @@ def ensure_explorer_urls(steps: list[dict]) -> tuple[list[dict], bool]:
     changed = False
     for step in steps:
         item = dict(step)
+        if item.get("output_index") is None:
+            item["output_index"] = 0
+            changed = True
         txid = str(item.get("txid") or "")
         if txid and not item.get("explorer"):
             item["explorer"] = f"{EXPLORER}/txs/{txid}"

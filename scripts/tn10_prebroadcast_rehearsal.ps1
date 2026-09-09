@@ -1,5 +1,5 @@
-# TN10 pre-broadcast rehearsal — everything except on-chain submit.
-# Runs while waiting for kaspa-python-sdk#78 published wheel.
+# TN10 pre-broadcast rehearsal - everything except on-chain submit.
+# Runs while waiting for kaspa-python-sdk PR 78 published wheel.
 # Not consensus evidence.
 
 $ErrorActionPreference = "Stop"
@@ -20,20 +20,35 @@ try {
     Remove-Item Env:TN10_SDK_DEV_PATCH -ErrorAction SilentlyContinue
 
     Write-Host "`n=== SilverScript compile + covenant rehearsal ==="
+    $env:TN10_SDK_DEV_PATCH = "1"
     powershell -File "$root\scripts\tn10_covenant_rehearsal.ps1"
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $covenantExit = $LASTEXITCODE
+    Remove-Item Env:TN10_SDK_DEV_PATCH -ErrorAction SilentlyContinue
+    if ($covenantExit -ne 0) { exit $covenantExit }
 
     Write-Host "`n=== owned-node health gate ==="
     powershell -File "$root\scripts\tn10_gate.ps1" -Json
     $gateExit = $LASTEXITCODE
     if ($gateExit -ne 0) {
-        Write-Warning "node gate not green — broadcast would fail-closed until 2/2 healthy"
+        Write-Warning "node gate not green - broadcast would fail-closed until 2/2 healthy"
     }
 
     Write-Host "`n=== summary ==="
-    Write-Host "native SDK ready: $(if ($nativeExit -eq 0) { 'yes' } else { 'no (expected until PR #78 wheel)' })"
-    Write-Host "dev patch ready:  $(if ($devExit -eq 0) { 'yes — TN10 dev broadcast available' } else { 'no' })"
-    Write-Host "node gate:        $(if ($gateExit -eq 0) { 'green' } else { 'red' })"
+    if ($nativeExit -eq 0) {
+        Write-Host "native SDK ready: yes"
+    } else {
+        Write-Host "native SDK ready: no (expected until PR 78 wheel)"
+    }
+    if ($devExit -eq 0) {
+        Write-Host "dev patch ready: yes (TN10 dev broadcast available)"
+    } else {
+        Write-Host "dev patch ready: no"
+    }
+    if ($gateExit -eq 0) {
+        Write-Host "node gate: green"
+    } else {
+        Write-Host "node gate: red"
+    }
 
     if ($devExit -eq 0 -and $gateExit -eq 0) {
         Write-Host "`nOptional TN10 dev broadcast (testnet only):"

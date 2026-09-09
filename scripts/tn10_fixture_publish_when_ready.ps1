@@ -1,19 +1,35 @@
 # Publish TN10 covenant proof fixtures when the SDK gate turns green.
-# Fail-closed until kaspa-python-sdk#78 is in a published wheel with SilverScript.
+# Fail-closed until kaspa-python-sdk PR 78 is in a published wheel with SilverScript.
 # Not consensus evidence.
+
+param(
+    [switch]$Dev
+)
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Push-Location $root
 
-$gateJson = & python "$root\scripts\tn10_sdk_gate.py" --json 2>&1 | Out-String
+if ($Dev) {
+    $env:TN10_SDK_DEV_PATCH = "1"
+    $gateJson = & python "$root\scripts\tn10_sdk_gate.py" --dev --json 2>&1 | Out-String
+} else {
+    $gateJson = & python "$root\scripts\tn10_sdk_gate.py" --json 2>&1 | Out-String
+}
 Write-Host $gateJson
 $gate = $gateJson | ConvertFrom-Json
 
 if (-not $gate.ready) {
-    Write-Host "SDK gate not ready (computeBudget + SilverScript required). Blocked on kaspa-python-sdk#78."
-    Write-Host "PR: $($gate.pr78Url)"
-    exit 1
+    if ($Dev -and $gate.readyWithDevPatch) {
+        Write-Host "Using dev patch gate (TN10 testnet rehearsal only)."
+    } elseif (-not $Dev) {
+        Write-Host "SDK gate not ready (computeBudget + SilverScript required). Blocked on kaspa-python-sdk PR 78."
+        Write-Host "PR: $($gate.pr78Url)"
+        exit 1
+    } else {
+        Write-Host "Dev patch gate not ready."
+        exit 1
+    }
 }
 
 Write-Host "SDK gate green - broadcasting reference covenant apps and publishing fixtures..."
