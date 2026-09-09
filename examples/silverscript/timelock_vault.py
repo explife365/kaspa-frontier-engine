@@ -60,6 +60,8 @@ from covenant_common import (
     proof_step,
     remaining_flow,
     require_toccata_sdk,
+    rpc_virtual_daa,
+    script_with_bool_state,
     submit_transaction,
     utxo_amount,
     virtual_daa,
@@ -95,8 +97,8 @@ def compiled_vault(unlock_daa: int) -> silverscript.CompiledContract:
 
 
 def lock_script(unlock_daa: int, released: bool) -> ScriptPublicKey:
-    redeem = compiled_vault(unlock_daa).script
-    state = 1 if released else 0
+    contract = compiled_vault(unlock_daa)
+    redeem = script_with_bool_state(contract, released)
     return ScriptBuilder.from_script(redeem, covenants_enabled=True).create_pay_to_script_hash_script()
 
 
@@ -108,7 +110,9 @@ def unlock_script(unlock_daa: int, released: bool, current_daa: int) -> bytes:
     contract = compiled_vault(unlock_daa)
     call = contract.build_sig_script_for_covenant_decl("release", [current_daa])
     redeem = bytes.fromhex(
-        ScriptBuilder(covenants_enabled=True).add_data(contract.script).to_string()
+        ScriptBuilder(covenants_enabled=True)
+        .add_data(script_with_bool_state(contract, released))
+        .to_string()
     )
     return call + redeem
 
@@ -160,6 +164,8 @@ async def build_vault_tx(
     fee = 0
     mass = 0
     for _ in range(5):
+        if fee >= value_in:
+            raise RuntimeError(f"fee {fee} sompi exceeds input {value_in}")
         value_out = value_in - fee
         draft = Transaction(
             TX_VERSION, [spend], [TransactionOutput(value_out, spk, covenant)],
@@ -207,7 +213,7 @@ async def genesis(
 
 
 async def release(client: RpcClient, vault: Vault) -> Vault:
-    current_daa = virtual_daa()
+    current_daa = await rpc_virtual_daa(client)
     if current_daa < vault.unlock_daa:
         raise RuntimeError(
             f"DAA timelock active: need {vault.unlock_daa}, current {current_daa}"

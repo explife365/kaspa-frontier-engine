@@ -49,12 +49,15 @@ from covenant_common import (
     SUBNETWORK_ID,
     TX_VERSION,
     ensure_explorer_urls,
+    funding_inputs,
     load_or_create_funder,
     load_proof_steps,
     make_client,
     proof_step,
     remaining_flow,
     require_toccata_sdk,
+    script_with_bool_state,
+    select_genesis_utxos,
     submit_transaction,
     utxo_amount,
     wait_for_funds,
@@ -89,7 +92,8 @@ def compiled_swap(allowed_recipient_hash: int) -> silverscript.CompiledContract:
 
 
 def lock_script(allowed_recipient_hash: int, swapped: bool) -> ScriptPublicKey:
-    redeem = compiled_swap(allowed_recipient_hash).script
+    contract = compiled_swap(allowed_recipient_hash)
+    redeem = script_with_bool_state(contract, swapped)
     return ScriptBuilder.from_script(redeem, covenants_enabled=True).create_pay_to_script_hash_script()
 
 
@@ -103,7 +107,9 @@ def unlock_script(allowed_recipient_hash: int, swapped: bool, recipient_hash: in
     contract = compiled_swap(allowed_recipient_hash)
     call = contract.build_sig_script_for_covenant_decl("swap", [recipient_hash])
     redeem = bytes.fromhex(
-        ScriptBuilder(covenants_enabled=True).add_data(contract.script).to_string()
+        ScriptBuilder(covenants_enabled=True)
+        .add_data(script_with_bool_state(contract, swapped))
+        .to_string()
     )
     return call + redeem
 
@@ -143,7 +149,7 @@ class SwapState:
 
 async def build_swap_tx(
     client: RpcClient,
-    spend: TransactionInput,
+    spends: list[TransactionInput],
     value_in: int,
     allowed_recipient_hash: int,
     swapped: bool,
@@ -155,15 +161,18 @@ async def build_swap_tx(
     fee = 0
     mass = 0
     for _ in range(5):
+        if fee >= value_in:
+            raise RuntimeError(f"fee {fee} sompi exceeds input {value_in}")
         value_out = value_in - fee
         draft = Transaction(
-            TX_VERSION, [spend], [TransactionOutput(value_out, spk, covenant)],
+            TX_VERSION, spends, [TransactionOutput(value_out, spk, covenant)],
             lock_time=0, subnetwork_id=SUBNETWORK_ID, gas=0, payload=b"", mass=0,
         )
         if covenant is None:
             draft.populate_genesis_covenants([GenesisCovenantGroup(authorizing_input=0, outputs=[0])])
         mass = calculate_transaction_mass(NETWORK_ID, draft)
-        fee_mass = mass + GRAMS_PER_COMPUTE_BUDGET_UNIT * COMPUTE_BUDGET + FEE_MASS_SLACK
+        compute_units = sum(int(inp.compute_budget) for inp in spends)
+        fee_mass = mass + GRAMS_PER_COMPUTE_BUDGET_UNIT * compute_units + FEE_MASS_SLACK
         new_fee = fee_mass * feerate
         if new_fee == fee:
             break
@@ -172,7 +181,7 @@ async def build_swap_tx(
         raise RuntimeError(f"fee {fee} sompi exceeds input {value_in}")
     value_out = value_in - fee
     tx = Transaction(
-        TX_VERSION, [spend], [TransactionOutput(value_out, spk, covenant)],
+        TX_VERSION, spends, [TransactionOutput(value_out, spk, covenant)],
         lock_time=0, subnetwork_id=SUBNETWORK_ID, gas=0, payload=b"", mass=mass,
     )
     return tx, value_out
@@ -184,17 +193,11 @@ async def genesis(
     funding_utxos: list[dict],
     allowed_recipient_hash: int,
 ) -> SwapState:
-    funding = max(funding_utxos, key=utxo_amount)
-    spend = TransactionInput(
-        TransactionOutpoint(Hash(funding["outpoint"]["transactionId"]), funding["outpoint"]["index"]),
-        b"",
-        sequence=0,
-        sig_op_count=0,
-        compute_budget=COMPUTE_BUDGET,
-        utxo=UtxoEntryReference.from_dict(funding),
-    )
+    selected = select_genesis_utxos(funding_utxos)
+    spends = funding_inputs(selected)
+    value_in = sum(utxo_amount(entry) for entry in selected)
     tx, value = await build_swap_tx(
-        client, spend, utxo_amount(funding), allowed_recipient_hash, False, None
+        client, spends, value_in, allowed_recipient_hash, False, None
     )
     tx.populate_genesis_covenants([GenesisCovenantGroup(authorizing_input=0, outputs=[0])])
     covenant_id = tx.outputs[0].to_dict()["covenant"]["covenantId"]
@@ -222,7 +225,7 @@ async def swap(client: RpcClient, state: SwapState) -> SwapState:
     )
     binding = CovenantBinding(authorizing_input=0, covenant_id=Hash(state.covenant_id))
     tx, value = await build_swap_tx(
-        client, spend, state.value, state.allowed_recipient_hash, True, binding
+        client, [spend], state.value, state.allowed_recipient_hash, True, binding
     )
     result = await submit_transaction(client, {"transaction": tx, "allowOrphan": False})
     return SwapState(

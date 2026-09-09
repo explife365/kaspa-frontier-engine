@@ -59,6 +59,7 @@ COMPUTE_BUDGET = 10
 GRAMS_PER_COMPUTE_BUDGET_UNIT = 100
 FEE_MASS_SLACK = 200
 MIN_FUNDING_SOMPI = 100_000_000
+MIN_GENESIS_UTXO_SOMPI = 10_000_000
 FUNDS_TIMEOUT_S = 45 * 60
 ACCEPT_TIMEOUT_S = 180
 SUBMIT_RETRIES = 3
@@ -277,24 +278,38 @@ async def wait_for_funds(client: RpcClient, addr: Address) -> list[dict]:
     while True:
         result = await client.get_utxos_by_addresses({"addresses": [addr]})
         daa = virtual_daa()
-        funded = [
+        mature = [
             e
             for e in result["entries"]
-            if utxo_amount(e) >= MIN_FUNDING_SOMPI and is_mature_utxo(e, daa)
+            if is_mature_utxo(e, daa) and utxo_amount(e) >= MIN_GENESIS_UTXO_SOMPI
         ]
-        if funded:
-            return funded
+        total = sum(utxo_amount(e) for e in mature)
+        if mature and (
+            max(utxo_amount(e) for e in mature) >= MIN_FUNDING_SOMPI
+            or total >= MIN_FUNDING_SOMPI
+        ):
+            return mature
         if time.monotonic() >= deadline:
-            raise TimeoutError(f"no faucet UTXO (>= 1 tKAS) after {FUNDS_TIMEOUT_S}s for {addr}")
+            raise TimeoutError(
+                f"no mature spendable UTXO (need >= {MIN_GENESIS_UTXO_SOMPI} sompi each "
+                f"and {MIN_FUNDING_SOMPI} sompi total) after {FUNDS_TIMEOUT_S}s for {addr}"
+            )
         immature = [
             e
             for e in result["entries"]
-            if utxo_amount(e) >= MIN_FUNDING_SOMPI and not is_mature_utxo(e, daa)
+            if utxo_amount(e) >= MIN_GENESIS_UTXO_SOMPI and not is_mature_utxo(e, daa)
         ]
         if immature:
             print(f"waiting for coinbase maturity (1000 DAA) at {addr} ...")
+        elif mature:
+            print(
+                f"waiting for more funds at {addr} "
+                f"(have {total} sompi, need {MIN_FUNDING_SOMPI}) ..."
+            )
         else:
-            print(f"waiting for faucet (>= 1 tKAS) to {addr} ...")
+            print(
+                f"waiting for faucet (>= {MIN_GENESIS_UTXO_SOMPI} sompi per UTXO) to {addr} ..."
+            )
         await asyncio.sleep(2)
 
 

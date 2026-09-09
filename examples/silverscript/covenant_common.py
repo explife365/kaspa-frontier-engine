@@ -18,7 +18,9 @@ from kaspa import (
     RpcClient,
     TransactionInput,
     TransactionOutpoint,
+    UtxoEntryReference,
 )
+import kaspa.experimental.silverscript as silverscript
 
 NETWORK_ID = "testnet-10"
 NETWORK_TYPE = "testnet"
@@ -28,6 +30,8 @@ COMPUTE_BUDGET = 10
 GRAMS_PER_COMPUTE_BUDGET_UNIT = 100
 FEE_MASS_SLACK = 200
 MIN_FUNDING_SOMPI = 100_000_000
+MIN_GENESIS_UTXO_SOMPI = 10_000_000
+MIN_GENESIS_INPUT_SOMPI = 50_000_000
 FUNDS_TIMEOUT_S = 45 * 60
 ACCEPT_TIMEOUT_S = 180
 SUBMIT_RETRIES = 3
@@ -49,6 +53,24 @@ from kaspa_sdk_dev_patch import (  # noqa: E402
 )
 
 ensure_dev_patch_if_enabled()
+
+
+def script_with_bool_state(contract: silverscript.CompiledContract, flag: bool) -> bytes:
+    """Patch bool covenant state embedded in a compiled SilverScript script."""
+    script = bytearray(contract.script)
+    start, length = contract.state_layout
+    if length >= 2:
+        script[start + 1] = 1 if flag else 0
+    return bytes(script)
+
+
+async def rpc_virtual_daa(client: RpcClient) -> int:
+    info = await client.get_block_dag_info()
+    for key in ("virtualDaaScore", "virtualSelectedParentDaaScore"):
+        value = info.get(key)
+        if value is not None:
+            return int(value)
+    raise RuntimeError("RPC block DAG info missing virtual DAA score")
 
 
 def require_toccata_sdk() -> None:
@@ -104,29 +126,77 @@ def utxo_amount(entry: dict) -> int:
     return int(entry["utxoEntry"]["amount"])
 
 
+def select_genesis_utxos(funding_utxos: list[dict]) -> list[dict]:
+    """Pick one large UTXO or combine inputs until covenant genesis fees fit."""
+    ordered = sorted(funding_utxos, key=utxo_amount, reverse=True)
+    if not ordered:
+        return []
+    if utxo_amount(ordered[0]) >= MIN_GENESIS_INPUT_SOMPI:
+        return [ordered[0]]
+    selected: list[dict] = []
+    total = 0
+    for entry in ordered:
+        selected.append(entry)
+        total += utxo_amount(entry)
+        if total >= MIN_GENESIS_INPUT_SOMPI:
+            return selected
+    return selected
+
+
+def funding_inputs(funder_entries: list[dict]) -> list[TransactionInput]:
+    return [
+        TransactionInput(
+            TransactionOutpoint(
+                Hash(entry["outpoint"]["transactionId"]),
+                entry["outpoint"]["index"],
+            ),
+            b"",
+            sequence=0,
+            sig_op_count=0,
+            compute_budget=COMPUTE_BUDGET,
+            utxo=UtxoEntryReference.from_dict(entry),
+        )
+        for entry in funder_entries
+    ]
+
+
 async def wait_for_funds(client: RpcClient, addr: Address) -> list[dict]:
     deadline = time.monotonic() + FUNDS_TIMEOUT_S
     while True:
         result = await client.get_utxos_by_addresses({"addresses": [addr]})
         daa = virtual_daa()
-        funded = [
+        mature = [
             e
             for e in result["entries"]
-            if utxo_amount(e) >= MIN_FUNDING_SOMPI and is_mature_utxo(e, daa)
+            if is_mature_utxo(e, daa) and utxo_amount(e) >= MIN_GENESIS_UTXO_SOMPI
         ]
-        if funded:
-            return funded
+        total = sum(utxo_amount(e) for e in mature)
+        if mature and (
+            max(utxo_amount(e) for e in mature) >= MIN_FUNDING_SOMPI
+            or total >= MIN_FUNDING_SOMPI
+        ):
+            return mature
         if time.monotonic() >= deadline:
-            raise TimeoutError(f"no faucet UTXO (>= 1 tKAS) after {FUNDS_TIMEOUT_S}s for {addr}")
+            raise TimeoutError(
+                f"no mature spendable UTXO (need >= {MIN_GENESIS_UTXO_SOMPI} sompi each "
+                f"and {MIN_FUNDING_SOMPI} sompi total) after {FUNDS_TIMEOUT_S}s for {addr}"
+            )
         immature = [
             e
             for e in result["entries"]
-            if utxo_amount(e) >= MIN_FUNDING_SOMPI and not is_mature_utxo(e, daa)
+            if utxo_amount(e) >= MIN_GENESIS_UTXO_SOMPI and not is_mature_utxo(e, daa)
         ]
         if immature:
             print(f"waiting for coinbase maturity (1000 DAA) at {addr} ...")
+        elif mature:
+            print(
+                f"waiting for more funds at {addr} "
+                f"(have {total} sompi, need {MIN_FUNDING_SOMPI}) ..."
+            )
         else:
-            print(f"waiting for faucet (>= 1 tKAS) to {addr} ...")
+            print(
+                f"waiting for faucet (>= {MIN_GENESIS_UTXO_SOMPI} sompi per UTXO) to {addr} ..."
+            )
         await asyncio.sleep(2)
 
 
