@@ -8,13 +8,19 @@ What is working today on TN10:
 - N-of-M owned-node health gate (node 1 + node 2, fail-closed until 2/2 green)
 - SQLite-backed deposits, withdrawals, and webhook outbox with idempotency keys
 - wRPC live ingestion with subscribe-ack journal replay (rusty-kaspa#939 pattern)
-- tn10-proof for counter, timelock vault, and restricted swap lineage checks
+- tn10-proof for counter, timelock vault, and restricted swap lineage checks (all three have public proof fixtures)
 - Bounded tn10-covenant-rpc shim while getUtxosByCovenantId is not on kaspad
 
 One command rehearsal:
   powershell -File scripts/tn10_rehearsal.ps1 -Covenant
 
-Next unlock for public covenant txids: kaspa-python-sdk#78 (computeBudget in TransactionInput.to_dict). Three SilverScript reference apps are ready; repro gate:
+Latest TN10 covenant txids (proof fixtures in repo):
+- Timelock vault release: https://explorer-tn10.kaspa.org/txs/33743ee5fc224aae3e01ced94f29c6ca3238d7dc4a3c92b8a2c49948cc575d4f
+- Restricted swap: https://explorer-tn10.kaspa.org/txs/9dbb658daab4dab916f047871c74508b653d2e4c37aeb6e34ab1a2a9b049a8ae
+
+Next unlock for **native** covenant broadcast: kaspa-python-sdk#78 (computeBudget in TransactionInput.to_dict). TN10 dev rehearsal path: `TN10_SDK_DEV_PATCH=1` + `scripts/tn10_dev_broadcast.ps1`.
+
+Repro gate:
   python scripts/tn10_sdk_gate.py --json
 
 Helpful reviews: PR #78 on kaspa-python-sdk, rusty-kaspa#1073 and #1102 for integrator context.

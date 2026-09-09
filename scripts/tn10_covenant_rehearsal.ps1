@@ -1,4 +1,4 @@
-# TN10 L1 covenant integrator rehearsal (read + verify; broadcast blocked until SDK #78).
+# TN10 L1 covenant integrator rehearsal (read + verify; native broadcast fail-closed until SDK PR 78).
 # Not consensus evidence. Uses checked-in SilverScript counter proof bundle.
 
 $ErrorActionPreference = "Stop"
@@ -49,7 +49,7 @@ try {
         Write-Warning "live proof verify failed - regenerate with counter.py after SDK #78 or if TN10 pruned old txids"
     }
 
-    Write-Host "`n=== timelock vault compile (reference app; broadcast blocked until SDK #78) ==="
+    Write-Host "`n=== timelock vault compile + offline proof ==="
     python -c @"
 import sys
 from pathlib import Path
@@ -71,11 +71,10 @@ except RuntimeError as e:
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
     else {
-        Write-Host "`n=== timelock vault proof (skipped - no fixtures/tn10-vault-proof.json yet) ==="
-        Write-Host "see fixtures/tn10-vault-proof.PENDING.md"
+        Write-Host "`n=== timelock vault proof (skipped - no fixtures/tn10-vault-proof.json) ==="
     }
 
-    Write-Host "`n=== restricted swap compile (reference app; broadcast blocked until SDK #78) ==="
+    Write-Host "`n=== restricted swap compile + offline proof ==="
     python -c @"
 import sys
 from pathlib import Path
@@ -97,11 +96,10 @@ except RuntimeError as e:
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
     else {
-        Write-Host "`n=== restricted swap proof (skipped - no fixtures/tn10-swap-proof.json yet) ==="
-        Write-Host "see fixtures/tn10-swap-proof.PENDING.md"
+        Write-Host "`n=== restricted swap proof (skipped - no fixtures/tn10-swap-proof.json) ==="
     }
 
-    Write-Host "`n=== fresh counter broadcast path (expected fail-closed until SDK #78) ==="
+    Write-Host "`n=== fresh counter broadcast path (native fail-closed until SDK PR 78) ==="
     python -c @"
 import sys
 from pathlib import Path

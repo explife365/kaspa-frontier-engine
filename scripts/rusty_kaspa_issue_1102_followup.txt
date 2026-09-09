@@ -4,8 +4,8 @@ https://github.com/explife365/kaspa-frontier-engine
 
 Adds reproducible TN10 evidence for the topics in this thread:
 
-- **SDK gate:** `python scripts/tn10_sdk_gate.py --json` — `computeBudgetOk: false` on pinned `kaspa` 2.0.2rc1; blocks SilverScript covenant broadcast until [kaspa-python-sdk#78](https://github.com/kaspanet/kaspa-python-sdk/pull/78) merges and publishes.
-- **Covenant proofs:** `tn10-proof` with counter / timelock vault / restricted swap profiles; reference apps under `examples/silverscript/` (broadcast fail-closed until SDK wheel).
+- **SDK gate:** `python scripts/tn10_sdk_gate.py --json` — `computeBudgetOk: false` on pinned `kaspa` 2.0.2rc1; native SilverScript covenant broadcast fail-closed until [kaspa-python-sdk#78](https://github.com/kaspanet/kaspa-python-sdk/pull/78) merges and publishes. TN10 dev rehearsal: `TN10_SDK_DEV_PATCH=1` + `scripts/tn10_dev_broadcast.ps1`.
+- **Covenant proofs:** `tn10-proof` with counter / timelock vault / restricted swap profiles; all three have checked-in `fixtures/tn10-*-proof.json` with public explorer txids (vault release `33743ee5…`, swap `9dbb658d…`).
 - **`getUtxosByCovenantId` gap:** bounded `tn10-covenant-rpc` shim (REST + kascov); KIP outline in `scripts/getUtxosByCovenantId_kip_outline.md`.
 - **CEX rehearsal:** N-of-M owned-node gate (node 1 + node 2), durable deposits/withdrawals, webhook outbox with idempotency keys — see `scripts/cex_production_runbook.md`.
 

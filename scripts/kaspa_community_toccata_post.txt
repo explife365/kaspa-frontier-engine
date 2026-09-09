@@ -1,4 +1,4 @@
-Toccata integrator path on TN10 — almost there
+Toccata integrator path on TN10 — reference proofs are live
 
 Toccata v1 is live on kaspad (mass, compute_budget, covenant_id). TN10 has heavy covenant activity. The remaining integrator gap is mostly **SDK serialization**, not node consensus.
 
@@ -6,17 +6,18 @@ Toccata v1 is live on kaspad (mass, compute_budget, covenant_id). TN10 has heavy
 - kaspad accepts v1 txs with computeBudget
 - Pinned kaspa 2.0.2rc1 drops computeBudget on TransactionInput.to_dict() → effective budget 0 after RPC round-trip
 - Fix is one line in kaspa-python-sdk convert.rs — PR #78 is open and mergeable
+- All three SilverScript reference apps have **public TN10 txids** in the public integrator repo (dev-patch rehearsal on TN10; native wheel still fail-closed)
 
-**What is ready to ship after a published wheel:**
-- counter.py — increment covenant
-- timelock_vault.py — genesis → DAA wait → release
-- restricted_swap.py — fixed-recipient swap
-- tn10-proof bundles with public explorer txids
+**Public proof bundles (testnet-10):**
+- Counter: fixtures/tn10-counter-proof.json (genesis → add → subtract)
+- Timelock vault: genesis `9235ee5f…98a57e` → release `33743ee5…575d4f` (DAA-gated)
+- Restricted swap: genesis `0039d188…ef9f3` → swap `9dbb658d…9a8ae`
 
 Repro anyone can run:
   python scripts/tn10_sdk_gate.py --json
+  cargo run --release --bin tn10-proof -- fixtures/tn10-vault-proof.json --offline --json
 
-Public integrator repo (tests, gate, reference apps):
+Public integrator repo (tests, gate, reference apps, fixtures):
   https://github.com/explife365/kaspa-frontier-engine
 
 **How to help today:**
@@ -24,6 +25,6 @@ Public integrator repo (tests, gate, reference apps):
 - Run the gate on your environment and post JSON output on the PR
 - Wallet teams: covenant decode UX still lags chain data — explorers like kascov help
 
-Until #78 publishes, broadcasts stay fail-closed by design — not a kaspad bug.
+Until #78 publishes, **native** broadcasts stay fail-closed by design — not a kaspad bug. TN10 dev rehearsal uses `TN10_SDK_DEV_PATCH=1` (see repo README).
 
 Related: rusty-kaspa#1073 (script units exceeded symptom), #1102 (broader integrator notes).

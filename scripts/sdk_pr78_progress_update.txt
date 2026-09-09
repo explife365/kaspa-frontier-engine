@@ -1,0 +1,17 @@
+TN10 integrator update — all three SilverScript reference proofs now have public txids in the rehearsal repo:
+
+https://github.com/explife365/kaspa-frontier-engine
+
+- **Counter** — existing `fixtures/tn10-counter-proof.json` (offline + kascov verify green)
+- **Timelock vault** — genesis `9235ee5f…` → release `33743ee5…` (DAA-gated transition)
+- **Restricted swap** — genesis `0039d188…` → swap `9dbb658d…`
+
+Repro (no broadcast required):
+```
+cargo run --release --bin tn10-proof -- fixtures/tn10-vault-proof.json --offline --json
+cargo run --release --bin tn10-proof -- fixtures/tn10-swap-proof.json --offline --json
+```
+
+Native gate on pinned `kaspa==2.0.2rc1` still reports `computeBudgetOkNative: false` — expected fail-closed until this PR merges and publishes. TN10 dev rehearsal uses `TN10_SDK_DEV_PATCH=1` only on testnet.
+
+Review still appreciated when bandwidth allows.

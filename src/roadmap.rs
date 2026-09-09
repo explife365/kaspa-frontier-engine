@@ -155,7 +155,7 @@ pub fn print_integrator_next() {
     println!("  DRAT tooling: off unless a new UNSAT CNF lacks a verified proof");
     println!("  EVM work is Galleon L2 (wiKAS live); kaspad has no EVM — do not add one");
     println!("  CEX rehearsal: bounded multi-address ingestion + durable exact withdrawals + scheduled/dead-letter webhook outbox + atomic deduplicating receiver + delta-driven durable wRPC + subscribe-then-REST-scan (rusty-kaspa#939) + subscribe-ack journal replay applies to ledger on restart + ordered owned-node failover that will not subscribe to an unhealthy replica + shared N-of-M health gate (--dual, scripts/tn10_gate.ps1) on health/deposits/withdraw/outbox/receiver + mTLS required for non-loopback webhooks. Production still needs independently hosted nodes");
-    println!("  SDK gate: python scripts/tn10_sdk_gate.py --json (covenant broadcast blocked until kaspa-python-sdk#78 merges + publishes)");
+    println!("  SDK gate: python scripts/tn10_sdk_gate.py --json (native covenant broadcast fail-closed until kaspa-python-sdk#78; TN10 dev patch for rehearsal)");
     println!("  CertiK Skynet gap (~84.6 vs BTC ~97.5) is Foundation telemetry/ops — see scripts/certik_score_plan.md; maps to COMMUNITY_ASKS, not KIP-2 or BPS lore");
 }
 
@@ -194,7 +194,7 @@ pub const COMMUNITY_ASKS: &[CommunityAsk] = &[
     CommunityAsk {
         ask: "getUtxosByCovenantId",
         status: AskStatus::Partial,
-        note: "kascov covenant documents with typed embedded UTXOs + bounded tn10-covenant-rpc shim + tn10-proof REST/kascov/--kascov-only verification; reference apps counter + timelock_vault + restricted_swap (broadcast blocked until SDK #78); scripts/tn10_covenant_rehearsal.ps1 + tn10_covenant_rpc_smoke.ps1. still not kaspad",
+        note: "kascov covenant documents with typed embedded UTXOs + bounded tn10-covenant-rpc shim + tn10-proof REST/kascov/--kascov-only verification; reference apps counter + timelock_vault + restricted_swap with public TN10 proof fixtures (native broadcast fail-closed until kaspa-python-sdk#78; TN10 dev patch for rehearsal); scripts/tn10_covenant_rehearsal.ps1 + tn10_covenant_rpc_smoke.ps1. still not kaspad",
     },
     CommunityAsk {
         ask: "Kasplex KRC-20 mint/transfer",

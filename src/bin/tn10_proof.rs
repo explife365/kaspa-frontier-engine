@@ -78,7 +78,7 @@ fn load_offline_snapshots(
     } else {
         fs::read_to_string(&rest_path).map_err(|error| {
             format!(
-                "read {}: {error} (publish fixtures after broadcast; see fixtures/tn10-*-proof.PENDING.md)",
+                "read {}: {error} (run tn10_dev_broadcast.ps1 or capture_fixture_files after broadcast)",
                 rest_path.display()
             )
         })?
@@ -88,7 +88,7 @@ fn load_offline_snapshots(
     } else {
         fs::read_to_string(&kascov_path).map_err(|error| {
             format!(
-                "read {}: {error} (publish fixtures after broadcast; see fixtures/tn10-*-proof.PENDING.md)",
+                "read {}: {error} (run tn10_dev_broadcast.ps1 or capture_fixture_files after broadcast)",
                 kascov_path.display()
             )
         })?

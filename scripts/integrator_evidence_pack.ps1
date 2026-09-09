@@ -73,45 +73,46 @@ try {
     & cargo @wrpcArgs 2>&1 | Tee-Object -FilePath $outFile -Append
     Add-Content -Path $outFile -Value "tn10-wrpc-live resnapshot exit code: $LASTEXITCODE"
 
-    Write-Section "L1 covenant proof offline (fixtures)"
-    $proofPath = Join-Path $root "fixtures\tn10-counter-proof.json"
-    $proofOfflineText = & cargo run --quiet --release --bin tn10-proof -- $proofPath --offline --json 2>&1 | Out-String
-    $proofOfflineText | Add-Content -Path $outFile
-    $proofOfflineExit = $LASTEXITCODE
+    Write-Section "L1 covenant proof offline (all fixtures)"
+    $proofFixtures = @(
+        "fixtures\tn10-counter-proof.json",
+        "fixtures\tn10-vault-proof.json",
+        "fixtures\tn10-swap-proof.json"
+    )
+    $proofOfflineExit = 0
+    $proofKascovExit = 0
+    $proofExit = 0
+    $proofOfflineJson = @()
+    $proofKascovJson = @()
+    $proofJson = @()
+    foreach ($rel in $proofFixtures) {
+        $proofPath = Join-Path $root $rel
+        if (-not (Test-Path $proofPath)) {
+            Add-Content -Path $outFile -Value "missing fixture: $rel"
+            $proofOfflineExit = 1
+            continue
+        }
+        Add-Content -Path $outFile -Value "`n--- $rel offline ---"
+        $proofOfflineText = & cargo run --quiet --release --bin tn10-proof -- $proofPath --offline --json 2>&1 | Out-String
+        $proofOfflineText | Add-Content -Path $outFile
+        if ($LASTEXITCODE -ne 0) { $proofOfflineExit = $LASTEXITCODE }
+        try { $proofOfflineJson += ($proofOfflineText | ConvertFrom-Json) } catch { }
+
+        Add-Content -Path $outFile -Value "`n--- $rel kascov-only ---"
+        $proofKascovText = & cargo run --quiet --release --bin tn10-proof -- $proofPath --kascov-only --json 2>&1 | Out-String
+        $proofKascovText | Add-Content -Path $outFile
+        if ($LASTEXITCODE -ne 0) { $proofKascovExit = $LASTEXITCODE }
+        try { $proofKascovJson += ($proofKascovText | ConvertFrom-Json) } catch { }
+
+        Add-Content -Path $outFile -Value "`n--- $rel live ---"
+        $proofJsonText = & cargo run --quiet --release --bin tn10-proof -- $proofPath --json 2>&1 | Out-String
+        $proofJsonText | Add-Content -Path $outFile
+        if ($LASTEXITCODE -ne 0) { $proofExit = $LASTEXITCODE }
+        try { $proofJson += ($proofJsonText | ConvertFrom-Json) } catch { }
+    }
     Add-Content -Path $outFile -Value "tn10-proof --offline exit code: $proofOfflineExit"
-
-    Write-Section "L1 covenant proof live kascov (REST txids may be pruned)"
-    $proofKascovText = & cargo run --quiet --release --bin tn10-proof -- $proofPath --kascov-only --json 2>&1 | Out-String
-    $proofKascovText | Add-Content -Path $outFile
-    $proofKascovExit = $LASTEXITCODE
     Add-Content -Path $outFile -Value "tn10-proof --kascov-only exit code: $proofKascovExit"
-
-    Write-Section "L1 covenant proof live (REST + kascov)"
-    $proofJsonText = & cargo run --quiet --release --bin tn10-proof -- $proofPath --json 2>&1 | Out-String
-    $proofJsonText | Add-Content -Path $outFile
-    $proofExit = $LASTEXITCODE
     Add-Content -Path $outFile -Value "tn10-proof live exit code: $proofExit"
-    $proofJson = $null
-    try {
-        $proofJson = $proofJsonText | ConvertFrom-Json
-    }
-    catch {
-        Add-Content -Path $outFile -Value "proof json parse failed: $_"
-    }
-    $proofOfflineJson = $null
-    try {
-        $proofOfflineJson = $proofOfflineText | ConvertFrom-Json
-    }
-    catch {
-        Add-Content -Path $outFile -Value "offline proof json parse failed: $_"
-    }
-    $proofKascovJson = $null
-    try {
-        $proofKascovJson = $proofKascovText | ConvertFrom-Json
-    }
-    catch {
-        Add-Content -Path $outFile -Value "kascov-only proof json parse failed: $_"
-    }
 
     Write-Section "covenant RPC live smoke (REST + kascov)"
     $rpcSmokeText = & powershell -File "$root\scripts\tn10_covenant_rpc_smoke.ps1" -Json 2>&1 | Out-String
