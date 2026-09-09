@@ -12,4 +12,4 @@ python scripts/tn10_sdk_gate.py --json
 
 Fix tracked in [kaspa-python-sdk#78](https://github.com/kaspanet/kaspa-python-sdk/pull/78) (`computeBudget` in `TryToPyDict`). Not rusty-kaspa#1074 (WASM generator).
 
-Three SilverScript reference apps are ready to broadcast and publish proof fixtures once a **published wheel** includes the fix.
+**Update:** all three SilverScript reference apps now have public TN10 proof fixtures (counter, timelock vault, restricted swap). Vault release: `33743ee5fc224aae3e01ced94f29c6ca3238d7dc4a3c92b8a2c49948cc575d4f`. Swap: `9dbb658daab4dab916f047871c74508b653d2e4c37aeb6e34ab1a2a9b049a8ae`. Native wheel path still fail-closed until #78 publishes.

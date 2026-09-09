@@ -8,6 +8,8 @@ https://github.com/explife365/kaspa-frontier-engine
 python scripts/tn10_sdk_gate.py --json
 ```
 
-Serialization fix: [kaspa-python-sdk#78](https://github.com/kaspanet/kaspa-python-sdk/pull/78). Once merged and published, TN10 covenant broadcasts and proof fixtures can proceed; happy to link txids there.
+Serialization fix: [kaspa-python-sdk#78](https://github.com/kaspanet/kaspa-python-sdk/pull/78). Maintainer acknowledged review (8 Sep 2026).
+
+**Update:** TN10 proof fixtures shipped for counter, timelock vault, and restricted swap — public explorer txids in repo `fixtures/tn10-*-proof.json`. Native broadcast remains fail-closed until a published wheel includes #78.
 
 Item 1 (sighash utility) would also unblock cleaner SilverScript spend paths — still appreciated as a follow-on.

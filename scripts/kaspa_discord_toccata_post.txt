@@ -1,0 +1,27 @@
+**Toccata integrator update — three TN10 covenant proofs are live**
+
+Toccata v1 is on kaspad (`compute_budget`, `covenant_id`, mass). The remaining integrator gap is mostly **SDK serialization**, not consensus.
+
+**What's live on TN10 (public txids + fixtures):**
+• Counter — genesis → add → subtract (`fixtures/tn10-counter-proof.json`)
+• Timelock vault — genesis → DAA release
+  https://explorer-tn10.kaspa.org/txs/33743ee5fc224aae3e01ced94f29c6ca3238d7dc4a3c92b8a2c49948cc575d4f
+• Restricted swap — genesis → authorized swap
+  https://explorer-tn10.kaspa.org/txs/9dbb658daab4dab916f047871c74508b653d2e4c37aeb6e34ab1a2a9b049a8ae
+
+**Repro (no broadcast needed):**
+```
+python scripts/tn10_sdk_gate.py --json
+cargo run --release --bin tn10-proof -- fixtures/tn10-vault-proof.json --offline --json
+```
+
+Public integrator repo (gate, tests, SilverScript apps, proof bundles):
+https://github.com/explife365/kaspa-frontier-engine
+
+**Blocker for native Python broadcast:** pinned `kaspa` drops `computeBudget` on `TransactionInput.to_dict()` → effective budget 0 after RPC round-trip. Fix: kaspa-python-sdk PR #78 (mergeable; maintainer acknowledged review). Not a kaspad bug.
+
+**How to help:** review PR #78, run the gate and paste JSON on the PR, wallet/explorer covenant decode UX.
+
+Related GitHub: rusty-kaspa #1102, #1128 (`getUtxosByCovenantId` RPC request).
+
+Suggested channel: `#smart-contract-brainstorming` or `#developers` (if Toccata/SilverScript fits better there).
