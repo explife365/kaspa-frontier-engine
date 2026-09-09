@@ -1047,7 +1047,14 @@ mod tests {
         assert!(proof.is_complete());
         proof.verify_rest_txs(&txs).unwrap();
         proof.verify_kascov(&coin).unwrap();
-        assert_eq!(coin.utxos.len(), 1);
-        assert_eq!(coin.utxos[0].outpoint, format!("{}:0", proof.steps[2].txid));
+        assert_eq!(coin.live_utxos, 1);
+        let final_outpoint = format!("{}:0", proof.steps[2].txid);
+        let live = coin
+            .utxos
+            .iter()
+            .filter(|utxo| utxo.live)
+            .collect::<Vec<_>>();
+        assert_eq!(live.len(), 1);
+        assert_eq!(live[0].outpoint, final_outpoint);
     }
 }
