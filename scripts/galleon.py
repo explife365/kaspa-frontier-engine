@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
 from datetime import datetime, timezone
 from typing import Any
 
@@ -18,7 +19,9 @@ GALLEON_ENTRY_ADDRESS = (
 )
 GALLEON_ENTRY_MIN_SOMPI = 100_000_000
 IGRA_FAUCET = "https://faucet.igralabs.com"
-GALLEON_RPC = "https://galleon-testnet.igralabs.com:8545"
+GALLEON_RPC = os.environ.get(
+    "GALLEON_RPC", "https://galleon-testnet.igralabs.com:8545"
+).strip()
 GALLEON_CHAIN_ID = 38836
 GALLEON_EXPLORER = "https://explorer.galleon-testnet.igralabs.com"
 # Igra Galleon *test* USDC (6 decimals). Not Circle mainnet USDC. Not redeemable.
@@ -27,6 +30,8 @@ GALLEON_TEST_USDC = "0xFd89676CBb3D2742c565aFC02986370ef4ba667A"
 GALLEON_GTEST = "0xbc5e27ab3ce2edb243593cda2437e5b30e0d5d7d"
 # Wrapped iKAS (WETH9-style) live on Galleon. Not kaspad. Not USD.
 GALLEON_WRAPPED_IKAS = "0x7331b0a33ac9aa92f506f057bfaa049ea133f77f"
+# Populated in kaspa.env after examples/galleon_pool_deploy.py --broadcast
+GALLEON_MINI_POOL = ""
 # Canonical Circle USDC on Ethereum. Circle has not listed Galleon (38836).
 CIRCLE_USDC_ETHEREUM = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
 CIRCLE_USDC_ON_GALLEON = None
@@ -66,6 +71,8 @@ NATIVE_TRANSFER_GAS = 21_000
 GTEST_CREATE_IKAS = 1.40
 # wiKAS forge script simulate on Galleon: 753654 gas × 2000 gwei. Do not broadcast below this.
 WIKAS_CREATE_IKAS = 1.507308
+# HtlcBridgeReleaseSha256 eth_estimateGas ~483k × 2000 gwei (+ headroom).
+HTLC_BRIDGE_DEPLOY_IKAS = 0.97
 FAUCET_DRIP_IKAS = 0.1
 
 

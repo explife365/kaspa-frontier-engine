@@ -1,4 +1,4 @@
-"""Named TN10 test wallets (alice, bob, carol, dave, eve). Keys stay in kaspa.env.
+"""Named TN10 test wallets (alice … grace). Keys stay in kaspa.env.
 
 Independent dev sig / optional mainnet KAS (not the Kaspa Dev Fund):
     kaspa:qpxdemlyx445kt5xteux0qhadaw8lh5m0vnqvcy8fh483t70usgkkeulsx9cm
@@ -15,7 +15,7 @@ from kaspa import PrivateKey
 from kaspa_env import load_kaspa_env, upsert_kaspa_env
 
 NETWORK_TYPE = "testnet"
-WALLET_NAMES = ("alice", "bob", "carol", "dave", "eve")
+WALLET_NAMES = ("alice", "bob", "carol", "dave", "eve", "frank", "grace")
 EXPLORER = "https://explorer-tn10.kaspa.org"
 DEV_DONATION_ADDRESS = (
     "kaspa:qpxdemlyx445kt5xteux0qhadaw8lh5m0vnqvcy8fh483t70usgkkeulsx9cm"

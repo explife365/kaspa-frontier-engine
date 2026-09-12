@@ -1,17 +1,18 @@
 Follow-up from TN10 integrator rehearsal (public repo: https://github.com/explife365/kaspa-frontier-engine).
 
-Pinned `kaspa` 2.0.2rc1 still drops `computeBudget` on `TransactionInput.to_dict()`, so Toccata v1 SilverScript broadcasts fail closed (effective budget 0 after RPC round-trip). `from_dict` already accepts the key.
+PR #78 is **merged** — thank you. Pinned `kaspa` 2.0.2rc1 on PyPI still drops `computeBudget` on `TransactionInput.to_dict()`, so native Toccata v1 SilverScript broadcasts remain fail-closed until a **published wheel** includes the fix.
 
-Repro gate in the integrator repo:
+Repro gate:
 
 ```bash
 python scripts/tn10_sdk_gate.py --json
 ```
 
-Current output: `computeBudgetOk: false`, `silverscriptOk: true`, PR #78 `OPEN`.
+Current output: `readyNative: false`, `computeBudgetOkNative: false`, `readyWithDevPatch: true`, `pr78.state: MERGED`.
 
-Three reference covenant apps (counter, timelock vault, restricted swap) are ready to broadcast once a **published wheel** includes this fix **and** the SilverScript native extension (git-only pip installs have dropped the extension in some environments).
+**Shipped on TN10 since merge (offline tn10-proof OK):**
+- HTLC claim + refund fixtures
+- Escrow 2-of-3 genesis → release_seller
+- L1↔L2 HtlcBridgeRelease on Galleon (wiKAS claim live)
 
-Not in scope: rusty-kaspa#1074 (WASM wallet generator). Not a kaspad change.
-
-Happy to refresh public TN10 proof fixtures and link txids here after merge + release.
+Happy to refresh public proof fixtures and link txids after the PyPI RC lands. Not a kaspad change.

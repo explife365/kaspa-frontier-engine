@@ -126,6 +126,14 @@ cargo run --release --bin tn10-node-health
 cargo run --release --bin tn10-node-health -- --json --max-daa-lag 100
 cargo run --release --bin tn10-node-health -- --dual --min-healthy 2 --json
 powershell -File scripts/tn10_gate.ps1 -Json
+
+**Node adoption (owned kaspad):** one-shot onboarding prints IBD stages, adoption scorecard, and next steps:
+
+```powershell
+powershell -File scripts/tn10_node_onboard.ps1
+powershell -File scripts/tn10_node_onboard.ps1 -StartNode
+python scripts/tn10_adoption_scorecard.py --json
+```
 ```
 
 JSON reports include `stage` / `stageLabel` per node (`utxo_commit`, `body_sync`, `ibd_peers`, `healthy`, …). `python scripts/tn10_ibd_watch.py --json` polls the same stages without applying the full gate. One-shot rehearsal: `powershell -File scripts/tn10_rehearsal.ps1` (sets `TN10_MIN_HEALTHY=2`; add `-Covenant` for L1 covenant path). Covenant rehearsal: `scripts/tn10_covenant_rehearsal.ps1` (offline proof + RPC smoke + `--kascov-only` live verify). Evidence pack writes `.local/evidence/evidence_<stamp>.txt` plus combined `evidence_<stamp>.json` (IBD watch + gate + covenant proof + RPC smoke). Deposit, withdrawal, wRPC live ingestion, outbox `deliver`, and outbox receiver accept the same gate flags (`--dual`, `--min-healthy` / `--require-healthy`, `--max-daa-lag`); when `--min-healthy` is set they fail closed before polling, delivery, or bind. Env: `TN10_MIN_HEALTHY`, `TN10_OWNED_NODE_URLS` (comma-separated wRPC URLs).
@@ -275,7 +283,7 @@ kaspad is not waiting on this crate. Live L1 is UTXO + GHOSTDAG @ 10 BPS + Tocca
 | Archival / indexer cost | Ops, not missing consensus | `getUtxosByAddresses` + DAA depth via REST; `cex::snapshot_address` is the CEX wrapper. Do not port `Kaspa to do.pdf`’s account StateDB. |
 | Binance/Coinbase spot | Exchange custody + demand | The CEX. This crate only rehearses deposit/withdraw DAA |
 
-`tn10-status` prints **what is blocking kaspad**, integrator next, and this crate’s 14-row community-ask board (tally of shipped/partial/l2/refused). Do not patch rusty-kaspa to fake any of it.
+`tn10-status` prints **what is blocking kaspad**, integrator next, and this crate’s 15-row community-ask board (tally of shipped/partial/l2/refused). Do not patch rusty-kaspa to fake any of it.
 
 **CertiK Skynet gap (Foundation ops, not consensus):** Kaspa ~84.6 vs Bitcoin ~97.5 on Skynet (7 Sep 2026) — mostly missing social/GitHub linkage and Community Trust weighting, not weak L1 code (~92 code-security sub-score). Public audit inventory (Y3TI KDX, ScaleBit L2, no rusty-kaspa consensus audit): [`scripts/certik_score_plan.md`](scripts/certik_score_plan.md). Foundation Skynet draft: [`scripts/certik_foundation_submission.md`](scripts/certik_foundation_submission.md). Evidence runner: `powershell -File scripts/integrator_evidence_pack.ps1`. Live tracker: TN10 canvas CertiK section.
 

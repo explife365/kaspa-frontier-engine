@@ -49,12 +49,31 @@ $apps = @(
         Name = "restricted_swap"
         Script = "examples\silverscript\restricted_swap.py"
         Fixture = "fixtures\tn10-swap-proof.json"
+    },
+    @{
+        Name = "htlc"
+        Script = "examples\silverscript\htlc.py"
+        Fixture = "fixtures\tn10-htlc-proof.json"
+    },
+    @{
+        Name = "htlc_refund"
+        Script = "examples\silverscript\htlc.py"
+        ExtraArgs = @("--refund-rehearsal", "--no-resume")
+        Fixture = "fixtures\tn10-htlc-refund-proof.json"
+    },
+    @{
+        Name = "escrow_2of3"
+        Script = "examples\silverscript\escrow_2of3.py"
+        ExtraArgs = @("--short-timeout", "--no-resume")
+        Fixture = "fixtures\tn10-escrow-2of3-proof.json"
     }
 )
 
 foreach ($app in $apps) {
     Write-Host "`n=== $($app.Name) ==="
-    & python "$root\$($app.Script)" --publish-fixture
+    $extra = @()
+    if ($app.ExtraArgs) { $extra = $app.ExtraArgs }
+    & python "$root\$($app.Script)" @extra --publish-fixture
     if ($LASTEXITCODE -ne 0) {
         throw "$($app.Name) broadcast/publish failed with exit $LASTEXITCODE"
     }

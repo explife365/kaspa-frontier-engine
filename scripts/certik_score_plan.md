@@ -59,7 +59,7 @@ some dashboards — treat as **scores**, not `rusty-kaspa` proof.
 | A5 | Link **ScaleBit** L2 audit on kaspa.org ecosystem page (labeled L2) | Kasplex | Honest layering | No L1 conflation |
 | A6 | Igra **KasExitBridge** third-party audit + on-chain checksum hardening roadmap | Igra | Bridge trust | Report + issue tracker |
 | A7 | Integrator **evidence pack** (this crate) for CEX rehearsal | Integrators | `COMMUNITY_ASKS` CEX Partial | `scripts/integrator_evidence_pack.ps1` → `.local/evidence/` |
-| A8 | Post **SDK #78** repro on `kaspa-python-sdk` PR (Toccata broadcast blocked) | Community | Covenant UX Partial | Maintainer CI green; see `scripts/sdk_pr78_comment.md` |
+| A8 | **SDK #78** merged 10 Sep 2026; await PyPI RC wheel | Community | Covenant UX Partial | `python scripts/tn10_sdk_gate.py --json` → `readyNative: true` after install |
 
 ### Security review backlog (integrator crate, 7 Sep 2026)
 

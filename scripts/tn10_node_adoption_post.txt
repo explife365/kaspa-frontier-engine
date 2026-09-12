@@ -1,0 +1,33 @@
+Post to: Kaspa Discord **#ecosystem-projects** or **#development** (posted 12 Sep 2026).
+
+**TN10 integrator gate — 2/2 owned nodes green**
+
+Owned-node N-of-M gate is **green** (node1 loopback + host02 tunnel). Not consensus evidence. Not production CEX.
+
+**What's live (reproducible)**
+• **8** SilverScript proof bundles on TN10 — `python examples/integrator_status.py`
+• L1↔L2 SHA256 HTLC bridge (claim + refund fixtures)
+• Galleon MiniPool: seed + bidirectional swaps on chain 38836
+• Evidence pack: `powershell -File scripts/integrator_evidence_pack.ps1`
+  → `.local/evidence/evidence_20260911-234059.txt`
+
+**Operator commands**
+```
+python scripts/tn10_adoption_scorecard.py
+python examples/integrator_status.py --json
+powershell -File scripts/tn10_prebroadcast_rehearsal.ps1
+powershell -File scripts/tn10_host02_tunnel.ps1   # second node via host02
+```
+
+**Minimum viable node**
+```
+--testnet --netsuffix=10 --utxoindex --disable-upnp
+--rpclisten=127.0.0.1:16210 --rpclisten-json=127.0.0.1:18210
+--appdir /var/lib/kaspa/tn10
+```
+
+**Scoring stages:** unreachable → utxo_commit → body_sync → healthy. Do not credit deposits while gate is red.
+
+**Still external:** `getUtxosByCovenantId` in kaspad (kascov + REST shim today); kaspa-python-sdk **#78** PyPI wheel for native covenant broadcast.
+
+Public repo: https://github.com/explife365/kaspa-frontier-engine

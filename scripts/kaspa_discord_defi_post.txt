@@ -1,0 +1,32 @@
+Posted: Kaspa Discord **#smart-contract-brainstorming** (12 Sep 2026).
+
+**Integrator update — L1 HTLC + L2 Galleon MiniPool (rehearsal)**
+
+Parallel DeFi tracks on public testnets. Not mainnet. Not production liquidity.
+
+**L1 (TN10 SilverScript)**
+• HTLC int-tag + SHA256 variants: claim + refund fixtures (8 total covenant proofs)
+• SHA256 claim: `fixtures/tn10-htlc-sha256-proof.json`
+• SHA256 refund: `fixtures/tn10-htlc-sha256-refund-proof.json`
+• L1↔L2 bridge: `GALLEON_HTLC_BRIDGE_SHA256=0xdf22eeef5db98a2469b691667a698a0a6237bbdb` (claimed)
+• Verify: `python examples/integrator_status.py`
+
+**L2 (Igra Galleon chain 38836)**
+• `GalleonMiniPool`: `0xa423c4f6930e0bdb2fa32470441767dff3937d3d`
+• Reserves: **~20.3 gTEST / ~0.0099 wiKAS**
+• Swaps: `0x22b99520…` (gTEST→wiKAS), `0xf8e1fc0c…` (wiKAS→gTEST)
+• Explorer: https://explorer.galleon-testnet.igralabs.com/address/0xa423c4f6930e0bdb2fa32470441767dff3937d3d
+
+**Repro**
+```
+python examples/galleon_pool.py --status
+python examples/galleon_pool.py --quote 1.0 --zero-for-one
+python examples/l1_l2_bridge_finish_sha256.py --status
+cargo run --release --bin tn10-proof -- fixtures/tn10-htlc-sha256-proof.json --offline
+```
+
+Public repo: https://github.com/explife365/kaspa-frontier-engine
+
+**Still blocked:** kaspa-python-sdk #78 published wheel (dev patch OK on TN10).
+
+Suggested channel: `#smart-contract-brainstorming`

@@ -53,6 +53,25 @@ class SilverScriptCompileTests(unittest.TestCase):
         self.assertTrue(len(bytes(sample.script)) > 0)
         self.assertIn("RestrictedSwap", restricted_swap.SOURCE)
 
+    def test_htlc_compiles(self) -> None:
+        import htlc
+
+        sample = htlc.compiled_htlc(htlc.PAYMENT_HASH, 2_000_000)
+        self.assertTrue(len(bytes(sample.script)) > 0)
+        self.assertIn("Htlc", htlc.SOURCE)
+
+    def test_escrow_2of3_compiles(self) -> None:
+        import escrow_2of3
+
+        sample = escrow_2of3.compiled_escrow(
+            escrow_2of3.BUYER_HASH,
+            escrow_2of3.SELLER_HASH,
+            escrow_2of3.ARBITER_HASH,
+            2_000_000,
+        )
+        self.assertTrue(len(bytes(sample.script)) > 0)
+        self.assertIn("Escrow2of3", escrow_2of3.SOURCE)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,29 @@
+Post to: Kaspa Discord **#ecosystem-projects** (follow-up thread or new post).
+
+**L1↔L2 HTLC bridge — SHA256 hashlock path (integrator rehearsal)**
+
+kaspa-frontier-engine TN10 + Galleon testnet (not consensus, not production):
+
+**L1 (TN10, shipped):**
+- SilverScript HTLC with SHA256 payment hash (preimage `b"HTLC"`)
+- Claim tx: `e1d5eecf4eee5e577711ebafc707187429d1efb6cc3861aad4740614b7c0a2ba`
+- Offline verify: `cargo run --release --bin tn10-proof -- fixtures/tn10-htlc-sha256-proof.json --offline`
+
+**L2 (Galleon, shipped):**
+- `HtlcBridgeReleaseSha256`: `0xdf22eeef5db98a2469b691667a698a0a6237bbdb`
+- Payout: **0.001 wiKAS** (1e15 wei)
+- Fund deposit: `0x2966dac4f65af423593412c5594425c9724ed54ebe93badeb64d36e7c417ffe0`
+- Claim tx: `0x8fe42c4ebe4b55c39663a407ce057437398a1a9cbf39f0be4dc51075f1479ce8` (vault_balance 0, claimed: true)
+
+**Earlier int-tag demo (still valid):**
+- L1 hash `0x48544C43` + L2 `0xa41219f0873104ad11b2ee934e81d294eeef01eb` — full fund+claim shipped
+
+Playbook:
+```
+python examples/l1_l2_htlc_bridge.py --json
+python examples/l1_l2_bridge_finish_sha256.py --status
+```
+
+**Not shipped:** light-client proof of L1 inclusion on L2; production bridge economics.
+
+Repo: https://github.com/explife365/kaspa-frontier-engine

@@ -4,6 +4,14 @@ PR comment draft — `kaspanet/kaspa-python-sdk` #78 (`computeBudget` in `to_dic
 Earlier same-day comments cover local repro, unit tests, nested `Transaction` round-trip,
 and fork CI `action_required`.
 
+**Posted 2026-09-09:** fourth reference app HTLC genesis+claim on TN10 (dev patch);
+fixture + offline `tn10-proof` green. Comment: https://github.com/kaspanet/kaspa-python-sdk/pull/78#issuecomment-5609233889
+
+**Merged 2026-09-10:** smartgoo merged with covenantId hex round-trip tweaks; RC wheel
+expected in 1–2 days. Native gate still fail-closed on pinned `2.0.2rc1` until PyPI ships.
+
+**Posted 2026-09-10:** merge follow-up + RC wait. Comment: https://github.com/kaspanet/kaspa-python-sdk/pull/78#issuecomment-5624426616
+
 ---
 Pinned `kaspa` still drops that field on serialize, so covenant / SilverScript
 broadcasts fail closed (effective budget 0 after RPC round-trip).

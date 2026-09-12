@@ -77,7 +77,12 @@ try {
     $proofFixtures = @(
         "fixtures\tn10-counter-proof.json",
         "fixtures\tn10-vault-proof.json",
-        "fixtures\tn10-swap-proof.json"
+        "fixtures\tn10-swap-proof.json",
+        "fixtures\tn10-htlc-proof.json",
+        "fixtures\tn10-htlc-refund-proof.json",
+        "fixtures\tn10-htlc-sha256-proof.json",
+        "fixtures\tn10-htlc-sha256-refund-proof.json",
+        "fixtures\tn10-escrow-2of3-proof.json"
     )
     $proofOfflineExit = 0
     $proofKascovExit = 0

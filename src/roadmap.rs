@@ -194,7 +194,7 @@ pub const COMMUNITY_ASKS: &[CommunityAsk] = &[
     CommunityAsk {
         ask: "getUtxosByCovenantId",
         status: AskStatus::Partial,
-        note: "kascov covenant documents with typed embedded UTXOs + bounded tn10-covenant-rpc shim + tn10-proof REST/kascov/--kascov-only verification; reference apps counter + timelock_vault + restricted_swap with public TN10 proof fixtures (native broadcast fail-closed until kaspa-python-sdk#78; TN10 dev patch for rehearsal); scripts/tn10_covenant_rehearsal.ps1 + tn10_covenant_rpc_smoke.ps1. still not kaspad",
+        note: "kascov covenant documents with typed embedded UTXOs + bounded tn10-covenant-rpc shim + tn10-proof REST/kascov/--kascov-only verification; 8 TN10 fixtures (htlc + htlc-refund + htlc-sha256 + htlc-sha256-refund + escrow_2of3); L1↔L2 SHA256 bridge shipped; examples/integrator_status.py; native broadcast fail-closed until kaspa-python-sdk#78 wheel; still not kaspad",
     },
     CommunityAsk {
         ask: "Kasplex KRC-20 mint/transfer",
@@ -205,6 +205,11 @@ pub const COMMUNITY_ASKS: &[CommunityAsk] = &[
         ask: "gTEST ERC-20 on Galleon",
         status: AskStatus::Shipped,
         note: "0xbc5e27ab3ce2edb243593cda2437e5b30e0d5d7d permit ERC-20; not USD; not Circle",
+    },
+    CommunityAsk {
+        ask: "Galleon constant-product pool (rehearsal)",
+        status: AskStatus::Partial,
+        note: "GalleonMiniPool 0xa423c4f6930e0bdb2fa32470441767dff3937d3d seeded; swaps 0x22b99520… (gTEST→wiKAS) + 0xf8e1fc0c… (wiKAS→gTEST); galleon_pool.py quotes both directions; not production AMM",
     },
     CommunityAsk {
         ask: "Circle USDC / Uniswap on L1",
@@ -238,8 +243,8 @@ pub const COMMUNITY_ASKS: &[CommunityAsk] = &[
     },
     CommunityAsk {
         ask: "Local kaspad TN10 IBD",
-        status: AskStatus::Partial,
-        note: "owned kaspad 2.0.1 runs --utxoindex on the tn10 appdir; health fails closed on UTXO import (DAA 0), IBD peers, header/body gap, isolation, lag, and N-of-M. Node 1 and node 2 synced; --min-healthy 2 green when both loopback endpoints are up. Toccata broadcast fail-closed until kaspa-python-sdk #78 wheel",
+        status: AskStatus::Shipped,
+        note: "2/2 owned nodes healthy (node1 loopback + host02 tunnel 28210); tn10_adoption_scorecard.py + integrator_evidence_pack.ps1; fail-closed on UTXO import, IBD peers, header/body gap, lag, N-of-M. Covenant native broadcast still awaits kaspa-python-sdk#78 wheel (dev patch for TN10 rehearsal)",
     },
     CommunityAsk {
         ask: "KIP-2 SAT fragments",
@@ -314,9 +319,9 @@ mod tests {
             .iter()
             .any(|a| a.status == AskStatus::Refused));
         assert!(COMMUNITY_ASKS.iter().any(|a| a.ask.contains("gTEST")));
-        assert_eq!(COMMUNITY_ASKS.len(), 14);
+        assert_eq!(COMMUNITY_ASKS.len(), 15);
         let (shipped, partial, l2, refused) = community_ask_tally();
-        assert_eq!(shipped + partial + l2 + refused, 14);
+        assert_eq!(shipped + partial + l2 + refused, 15);
         assert!(shipped >= 5);
         assert!(COMMUNITY_ASKS
             .iter()

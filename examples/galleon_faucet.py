@@ -36,6 +36,7 @@ from galleon import (  # noqa: E402
     WIKAS_CREATE_IKAS,
     IGRA_FAUCET,
     NATIVE_TRANSFER_GAS,
+    HTLC_BRIDGE_DEPLOY_IKAS,
     extras_to_reach,
     claim_recorded_today,
     faucet_blocks_address,
@@ -212,10 +213,18 @@ def print_status() -> None:
         primary = address_of(galleon_key())
         bal = wei_to_ikas(rpc_hex("eth_getBalance", [primary, "latest"]))
         if GALLEON_WRAPPED_IKAS:
+            bridge_need = extras_to_reach(bal, HTLC_BRIDGE_DEPLOY_IKAS)
             print(
                 f"primary {bal:.6f} iKAS; wiKAS live {GALLEON_WRAPPED_IKAS} "
                 "(WETH9-style wrap; not kaspad; not USD)"
             )
+            if bridge_need:
+                print(
+                    f"bridge  need ~{HTLC_BRIDGE_DEPLOY_IKAS:.2f} iKAS for HtlcBridgeRelease deploy "
+                    f"(~{bridge_need} extra drips + sweep, or Entry from >=1 tKAS)"
+                )
+            else:
+                print(f"bridge  primary >= {HTLC_BRIDGE_DEPLOY_IKAS:.2f} iKAS — deploy preflight OK")
         else:
             need = extras_to_reach(bal, WIKAS_CREATE_IKAS)
             print(
@@ -564,6 +573,45 @@ def _skip_drip_error(label: str, key: str, err: RuntimeError) -> bool:
     raise err
 
 
+def fund_bridge(start: int = 211) -> None:
+    """Drip fresh extras and sweep until primary meets HtlcBridgeRelease preflight."""
+    ensure_wallet()
+    dest = address_of(galleon_key())
+    ensure_extra_range(start, start + 24, list_existing=False)
+    claimed_this_run = False
+    while True:
+        bal = wei_to_ikas(rpc_hex("eth_getBalance", [dest, "latest"]))
+        need = extras_to_reach(bal, HTLC_BRIDGE_DEPLOY_IKAS)
+        if need <= 0:
+            print(f"primary {bal:.4f} iKAS — ready for l1_l2_bridge_deploy --broadcast")
+            return
+        print(f"primary {bal:.4f} iKAS; need ~{need} more drips (~{HTLC_BRIDGE_DEPLOY_IKAS:.2f} target)")
+        progressed = False
+        for index in extra_indices():
+            if index < start:
+                continue
+            key = load_key(extra_key_env(index))
+            if claimed_today(address_of(key)):
+                continue
+            try:
+                if drip_with_key(key, f"wallet{index}", connection_spent=claimed_this_run):
+                    claimed_this_run = True
+                    progressed = True
+                    sweep_extras_to_primary(start=index)
+                    time.sleep(3)
+                    break
+            except RuntimeError as err:
+                if _skip_drip_error(f"wallet{index}", key, err):
+                    print("fund-bridge paused: faucet connection cap or busy")
+                    print(
+                        f"resume tomorrow: python examples/galleon_faucet.py --fund-bridge --start {index}"
+                    )
+                    return
+        if not progressed:
+            print("no fresh extras dripped; try tomorrow or Entry from >=1 tKAS")
+            return
+
+
 def drip_all(start: int = 2, include_primary: bool = True) -> None:
     # Keep extra keys ahead of --from so a high index is not a silent no-op.
     last_needed = start + 8
@@ -677,6 +725,40 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--balance", action="store_true")
     parser.add_argument("--send", metavar="0xADDR", help="owner-push native iKAS (21k gas)")
     parser.add_argument("--ikas", type=float, help="amount for --send")
+    parser.add_argument(
+        "--ensure-extra-range",
+        nargs=2,
+        type=int,
+        metavar=("FIRST", "LAST"),
+        help="create GALLEON_PRIVATE_KEY_FIRST..LAST (>=2) in kaspa.env",
+    )
+    parser.add_argument(
+        "--drip-extra",
+        type=int,
+        metavar="N",
+        help="drip wallet N (GALLEON_PRIVATE_KEY_N); use a fresh IP if connection-capped",
+    )
+    parser.add_argument(
+        "--drip-all",
+        action="store_true",
+        help="drip primary then extras from --start (default 2)",
+    )
+    parser.add_argument(
+        "--start",
+        type=int,
+        default=2,
+        help="first extra wallet index for --drip-all / --sweep (default 2)",
+    )
+    parser.add_argument(
+        "--sweep",
+        action="store_true",
+        help="sweep extras from --start into GALLEON_PRIVATE_KEY primary",
+    )
+    parser.add_argument(
+        "--fund-bridge",
+        action="store_true",
+        help=f"drip extras + sweep until primary >= {HTLC_BRIDGE_DEPLOY_IKAS:.2f} iKAS (bridge deploy)",
+    )
     return parser.parse_args()
 
 
@@ -700,14 +782,39 @@ def main() -> None:
         ensure_wallet()
         drip()
         return
+    if args.ensure_extra_range:
+        first, last = args.ensure_extra_range
+        ensure_extra_range(first, last, list_existing=True)
+        return
+    if args.drip_extra is not None:
+        index = args.drip_extra
+        if index < 2:
+            raise SystemExit("--drip-extra needs wallet index >= 2")
+        ensure_extra_range(index, index, list_existing=False)
+        key = load_key(extra_key_env(index))
+        drip_with_key(key, f"wallet{index}")
+        return
+    if args.drip_all:
+        ensure_wallet()
+        drip_all(start=args.start, include_primary=True)
+        return
+    if args.sweep:
+        ensure_wallet()
+        sweep_extras_to_primary(start=args.start)
+        return
+    if args.fund_bridge:
+        ensure_wallet()
+        fund_bridge(start=args.start)
+        return
     if args.send:
         if args.ikas is None:
             raise SystemExit("--send needs --ikas")
         send_native(args.send, args.ikas)
         return
     raise SystemExit(
-        "usage: galleon_faucet.py --status | --ensure-wallet | "
-        "--balance | --drip | --send 0x.. --ikas 0.01"
+        "usage: galleon_faucet.py --status | --ensure-wallet | --balance | --drip | "
+        "--ensure-extra-range N M | --drip-extra N | --drip-all [--start N] | "
+        "--sweep [--start N] | --fund-bridge [--start N] | --send 0x.. --ikas 0.01"
     )
 
 

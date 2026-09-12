@@ -1,0 +1,27 @@
+#development — app builder ↔ node requirements (TN10 integrator rehearsal)
+Channel ID: 755890250643144788
+
+---
+
+**What you need to ship a covenant app on TN10 (fail-closed checklist)**
+
+| Goal | Public REST (`api-tn10.kaspa.org`) | Owned kaspad (`--utxoindex`) | Notes |
+|------|-----------------------------------|------------------------------|-------|
+| Read blockdag / network | yes | yes | `python scripts/tn10_adoption_scorecard.py --public-only` |
+| Broadcast / submit tx | partial | yes | REST submit paths exist; custody should verify on owned node |
+| Confirm deposit credited | **no** | yes | N-of-M gate: `tn10_adoption_scorecard.py` (2/2 healthy) |
+| Covenant UTXO lookup | **no** (native) | shim/indexer | interim: kascov + `tn10-covenant-rpc`; tracking [rusty-kaspa#1128](https://github.com/kaspanet/rusty-kaspa/issues/1128) |
+| Offline proof verify | yes (fixtures) | yes | 8/8 fixtures: `python examples/integrator_status.py --skip-gate` |
+| HTLC / escrow rehearsal | fixtures + L1 scripts | broadcast leg | repo: `examples/l1_l2_htlc_bridge.py`, SilverScript HTLC |
+
+**No ~450G disk?** Start with `--public-only` scorecard + offline `tn10-proof` on fixtures. Do not credit user deposits until owned nodes are synced.
+
+**Full node path:** `powershell -File scripts/tn10_node_onboard.ps1`
+
+Repo (integrator rehearsal, not consensus): https://github.com/explife365/kaspa-frontier-engine
+
+Posted: msg 1548330348700631060
+
+#ecosystem-projects gate ticker (one-liner)
+Channel ID: 1040361239173398618
+Posted: msg 1548330351179333825

@@ -1,0 +1,46 @@
+Post to: Kaspa Discord team-player replies (posted 12 Sep 2026).
+
+---
+
+#ecosystem-projects — reply to DD12 (even/odd game)
+
+@DD12 Nice TN10 covenant game — commit/reveal on L1 is the right pattern. If you want owned-node deposit indexing later: tn10_node_onboard.ps1 + tn10_adoption_scorecard.py (fail-closed during IBD). Happy to compare notes.
+
+---
+
+#ecosystem-projects — reply to M99 (KRON audit thread)
+
+@M99 I can skim the Hashlock KRON audit and post a short technical read (covenant boundaries, upgrade paths, oracle assumptions) — not an endorsement, just dev notes. Report: https://kron.technology/audit
+
+---
+
+#ecosystem-projects — reply to GoonBoyCrypto (chess covenants)
+
+Strong work settling chess wagers on L1 covenants. If you want offline proof bundles / tn10-proof lineage for covenant txs, kaspa-frontier-engine has fixtures — happy to help wire deposit indexing.
+
+---
+
+#help-node — TN10 covenant node checklist
+
+**TN10 covenant node checklist** (integrator rehearsal — not consensus)
+
+Minimum flags: `--testnet --netsuffix=10 --utxoindex --disable-upnp` + dedicated `--appdir` (~450G disk budget on host02).
+
+Scorecard stages: unreachable → utxo_commit → body_sync → healthy. **Do not credit deposits while gate is red** (IBD / no utxoindex).
+
+`powershell -File scripts/tn10_node_onboard.ps1`
+`python scripts/tn10_adoption_scorecard.py`
+
+Repo: https://github.com/explife365/kaspa-frontier-engine
+
+---
+
+#development — reply to SouthWestIron (TN10 wRPC / REST)
+
+@SouthWestIron For TN10 payload shapes without full IBD: public REST + offline fixtures in kaspa-frontier-engine (`tn10-proof`, fixtures/tn10-*-proof.json). Owned-node path: `scripts/tn10_node_onboard.ps1` + `python scripts/tn10_adoption_scorecard.py` (fail-closed during sync). I would not expose a public wRPC endpoint — loopback/tunnel only.
+
+---
+
+#ecosystem-projects — reply to Shawn3d (KRON audit announcement)
+
+Solid milestone for native L1 covenant DeFi — public audit report sets a good bar for the ecosystem.

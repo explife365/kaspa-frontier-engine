@@ -3,7 +3,7 @@
 
 param(
     [switch]$SkipGate,
-    [string[]]$Apps = @("counter", "timelock_vault", "restricted_swap")
+    [string[]]$Apps = @("counter", "timelock_vault", "restricted_swap", "htlc")
 )
 
 if ($Apps.Count -eq 1 -and $Apps[0] -match ",") {
@@ -41,7 +41,8 @@ try {
     $catalog = @(
         @{ Name = "counter"; Script = "examples\silverscript\counter.py"; Fixture = "fixtures\tn10-counter-proof.json" },
         @{ Name = "timelock_vault"; Script = "examples\silverscript\timelock_vault.py"; Fixture = "fixtures\tn10-vault-proof.json" },
-        @{ Name = "restricted_swap"; Script = "examples\silverscript\restricted_swap.py"; Fixture = "fixtures\tn10-swap-proof.json" }
+        @{ Name = "restricted_swap"; Script = "examples\silverscript\restricted_swap.py"; Fixture = "fixtures\tn10-swap-proof.json" },
+        @{ Name = "htlc"; Script = "examples\silverscript\htlc.py"; Fixture = "fixtures\tn10-htlc-proof.json" }
     )
     $selected = @($catalog | Where-Object { $Apps -contains $_.Name })
     if (-not $selected) {

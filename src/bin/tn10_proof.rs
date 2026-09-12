@@ -65,7 +65,7 @@ fn load_offline_snapshots(
     ),
     Box<dyn std::error::Error>,
 > {
-    let prefix = proof.app_kind().fixture_prefix();
+    let prefix = proof.fixture_bundle_prefix();
     let fixture_dir = proof_path
         .parent()
         .filter(|dir| dir.ends_with("fixtures"))

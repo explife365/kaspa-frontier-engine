@@ -18,10 +18,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = KasplexClient::new(network::KASPLEX_TN10)?;
     match arg.as_deref() {
         None | Some("--mintable") => {
-            let (status, page) = tokio::join!(client.info(), client.tokenlist(None));
+            let (status, page, open_all) = tokio::join!(
+                client.info(),
+                client.tokenlist(None),
+                client.collect_open_mints(32)
+            );
             let status = status?;
             let page = page?;
-            let open: Vec<_> = page.open_mints().collect();
+            let open_all = open_all?;
+            let first_page_open = page.open_mints().count();
             println!(
                 "indexer  {}  tokens={}  daa_gap={}",
                 if status.is_synced() {
@@ -35,10 +40,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!(
                 "first page  {} rows  {} open mints  next={}",
                 page.result.len(),
-                open.len(),
+                first_page_open,
                 page.next.as_deref().unwrap_or("-")
             );
-            for token in open.iter().take(12) {
+            println!(
+                "all pages  {} open mints (paginated, max 32 pages)",
+                open_all.len()
+            );
+            for token in open_all.iter().take(12) {
                 println!(
                     "  {}  minted={}  lim={}  remaining={}  reveal={}",
                     token.ticker().unwrap_or("?"),
@@ -48,7 +57,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     token.hash_rev
                 );
             }
-            if let Some(first) = open.first().and_then(|t| t.ticker()) {
+            if let Some(first) = open_all.first().and_then(|t| t.ticker()) {
                 println!();
                 println!(
                     "example mint envelope  {}",

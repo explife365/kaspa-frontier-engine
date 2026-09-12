@@ -7,7 +7,36 @@ forge test
 python examples/galleon_faucet.py --status
 python examples/galleon_faucet.py --drip
 python examples/galleon_erc20.py
+python examples/galleon_pool.py --status
+python examples/galleon_pool.py --swap 0.1 --zero-for-one --dry-run
+python examples/galleon_pool.py --swap 0.1 --zero-for-one --broadcast
+python examples/galleon_pool_seed.py --broadcast
+python examples/l1_l2_bridge_deploy.py --simulate
+python examples/l1_l2_bridge_deploy.py --broadcast
+python examples/l1_l2_bridge_release.py --status
+python examples/l1_l2_bridge_release.py --fund --broadcast
+python examples/l1_l2_bridge_release.py --claim --broadcast
+python examples/l1_l2_bridge_deploy_sha256.py --simulate
+python examples/l1_l2_bridge_deploy_sha256.py --broadcast
+python examples/l1_l2_bridge_release_sha256.py --fund --broadcast
+python examples/l1_l2_bridge_release_sha256.py --claim --broadcast
+python examples/l1_l2_bridge_finish_sha256.py --status
+python examples/l1_l2_bridge_finish_sha256.py --broadcast
+python examples/l1_l2_htlc_bridge.py
 ```
+
+Live pool (gTEST / wiKAS): `0xa423c4f6930e0bdb2fa32470441767dff3937d3d`
+
+**GalleonMiniPool** (`src/GalleonMiniPool.sol`) is a minimal constant-product rehearsal AMM.
+Forge tests cover reserves, quotes, and swaps. Deploy with `forge script` (constructor takes
+two ERC-20 addresses), then probe live reserves:
+
+```bat
+python examples/galleon_pool.py --pool 0xDEPLOYED --token0 0xbc5e27ab3ce2edb243593cda2437e5b30e0d5d7d --token1 0x7331b0a33ac9aa92f506f057bfaa049ea133f77f --status
+python examples/galleon_pool.py --pool 0xDEPLOYED --quote 1.0 --zero-for-one
+```
+
+Not Uniswap. Not production liquidity. Rehearsal only on Galleon testnet.
 
 The official faucet is a shared test resource. Use one wallet, respect daily
 limits, and do not automate IP rotation or multi-account limit bypasses.

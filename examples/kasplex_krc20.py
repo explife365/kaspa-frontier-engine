@@ -304,19 +304,28 @@ async def wait_for_output(client: RpcClient, address: str, txid: str) -> dict:
 
 def print_mintable() -> None:
     info = kasplex_get("/info")
-    page = kasplex_get("/krc20/tokenlist")
     print(f"Kasplex {KASPLEX}")
     print(f"indexer  {info.get('message')}  tokens={info.get('result', {}).get('tokenTotal')}")
-    rows = page.get("result") or []
-    open_mints = [
-        row
-        for row in rows
-        if row.get("mod") == "mint"
-        and row.get("state") == "deployed"
-        and row.get("tick")
-        and int(row.get("max") or 0) > int(row.get("minted") or 0)
-    ]
-    print(f"first page  {len(rows)} tokens  {len(open_mints)} open mints")
+    rows: list[dict] = []
+    open_mints: list[dict] = []
+    cursor: str | None = None
+    for _ in range(32):
+        path = "/krc20/tokenlist" if not cursor else f"/krc20/tokenlist?next={cursor}"
+        page = kasplex_get(path)
+        batch = page.get("result") or []
+        rows.extend(batch)
+        open_mints.extend(
+            row
+            for row in batch
+            if row.get("mod") == "mint"
+            and row.get("state") == "deployed"
+            and row.get("tick")
+            and int(row.get("max") or 0) > int(row.get("minted") or 0)
+        )
+        cursor = page.get("next") or None
+        if not cursor:
+            break
+    print(f"all pages  {len(rows)} tokens  {len(open_mints)} open mints")
     for row in open_mints[:12]:
         print(
             f"  {row['tick']}  minted={row.get('minted')}  lim={row.get('lim')}  "

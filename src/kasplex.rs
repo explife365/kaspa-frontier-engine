@@ -236,6 +236,21 @@ impl KasplexClient {
         self.get_json(&path).await
     }
 
+    /// Walk `next` cursors until exhausted (bounded). Used by CLIs that need all open mints.
+    pub async fn collect_open_mints(&self, max_pages: usize) -> Result<Vec<KasplexToken>> {
+        let mut open = Vec::new();
+        let mut cursor: Option<String> = None;
+        for _ in 0..max_pages {
+            let page = self.tokenlist(cursor.as_deref()).await?;
+            open.extend(page.result.iter().filter(|t| t.is_open_mint()).cloned());
+            cursor = page.next.filter(|c| !c.is_empty());
+            if cursor.is_none() {
+                break;
+            }
+        }
+        Ok(open)
+    }
+
     pub async fn token(&self, tick: &str) -> Result<Option<KasplexToken>> {
         if !valid_tick(tick) {
             return Err(EngineError::Message(

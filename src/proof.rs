@@ -68,6 +68,16 @@ pub struct CovenantProof {
     pub unlock_daa: Option<u64>,
     #[serde(default)]
     pub allowed_recipient_hash: Option<i64>,
+    #[serde(default)]
+    pub payment_hash: Option<i64>,
+    #[serde(default)]
+    pub refund_daa: Option<u64>,
+    #[serde(default)]
+    pub buyer_hash: Option<i64>,
+    #[serde(default)]
+    pub seller_hash: Option<i64>,
+    #[serde(default)]
+    pub arbiter_hash: Option<i64>,
 }
 
 fn default_proof_app() -> String {
@@ -87,6 +97,8 @@ pub enum ProofApp {
     Counter,
     TimelockVault,
     RestrictedSwap,
+    Htlc,
+    Escrow2of3,
 }
 
 impl ProofApp {
@@ -95,6 +107,8 @@ impl ProofApp {
             ProofApp::Counter => &["genesis", "add(5)", "subtract(3)"],
             ProofApp::TimelockVault => &["genesis", "release"],
             ProofApp::RestrictedSwap => &["genesis", "swap"],
+            ProofApp::Htlc => &["genesis", "claim"],
+            ProofApp::Escrow2of3 => &["genesis", "release_seller"],
         }
     }
 
@@ -103,6 +117,25 @@ impl ProofApp {
             ProofApp::Counter => &[0, 5, 2],
             ProofApp::TimelockVault => &[0, 1],
             ProofApp::RestrictedSwap => &[0, 1],
+            ProofApp::Htlc => &[0, 1],
+            ProofApp::Escrow2of3 => &[0, 1],
+        }
+    }
+
+    pub fn htlc_second_step(step: &str) -> Option<i64> {
+        match step {
+            "claim" => Some(1),
+            "refund" => Some(2),
+            _ => None,
+        }
+    }
+
+    pub fn escrow_second_step(step: &str) -> Option<i64> {
+        match step {
+            "release_seller" => Some(1),
+            "refund_to_buyer" => Some(2),
+            "timeout_to_buyer" => Some(3),
+            _ => None,
         }
     }
 
@@ -111,6 +144,8 @@ impl ProofApp {
             ProofApp::Counter => "tn10-counter",
             ProofApp::TimelockVault => "tn10-vault",
             ProofApp::RestrictedSwap => "tn10-swap",
+            ProofApp::Htlc => "tn10-htlc",
+            ProofApp::Escrow2of3 => "tn10-escrow-2of3",
         }
     }
 }
@@ -130,8 +165,26 @@ impl CovenantProof {
         match self.app.as_str() {
             "timelock_vault" => ProofApp::TimelockVault,
             "restricted_swap" => ProofApp::RestrictedSwap,
+            "htlc" | "htlc_sha256" => ProofApp::Htlc,
+            "escrow_2of3" => ProofApp::Escrow2of3,
             _ => ProofApp::Counter,
         }
+    }
+
+    /// REST/kascov snapshot basename (claim vs refund HTLC use separate sidecars).
+    pub fn fixture_bundle_prefix(&self) -> String {
+        if self.app == "htlc_sha256" {
+            if self.steps.get(1).map(|step| step.step.as_str()) == Some("refund") {
+                return "tn10-htlc-sha256-refund".to_string();
+            }
+            return "tn10-htlc-sha256".to_string();
+        }
+        if self.app_kind() == ProofApp::Htlc
+            && self.steps.get(1).map(|step| step.step.as_str()) == Some("refund")
+        {
+            return "tn10-htlc-refund".to_string();
+        }
+        self.app_kind().fixture_prefix().to_string()
     }
 
     pub fn expected_steps(&self) -> &'static [&'static str] {
@@ -154,13 +207,38 @@ impl CovenantProof {
                     step.step
                 )));
             }
-            if step.step != expected {
+            if self.app_kind() == ProofApp::Htlc && i == 1 {
+                let expected_count = ProofApp::htlc_second_step(&step.step).ok_or_else(|| {
+                    EngineError::Message(format!(
+                        "htlc step 2 must be claim or refund, got {}",
+                        step.step
+                    ))
+                })?;
+                if step.count != expected_count {
+                    return Err(EngineError::Message(format!(
+                        "proof step {} has count {}, expected {}",
+                        step.step, step.count, expected_count
+                    )));
+                }
+            } else if self.app_kind() == ProofApp::Escrow2of3 && i == 1 {
+                let expected_count = ProofApp::escrow_second_step(&step.step).ok_or_else(|| {
+                    EngineError::Message(format!(
+                        "escrow step 2 must be release_seller, refund_to_buyer, or timeout_to_buyer, got {}",
+                        step.step
+                    ))
+                })?;
+                if step.count != expected_count {
+                    return Err(EngineError::Message(format!(
+                        "proof step {} has count {}, expected {}",
+                        step.step, step.count, expected_count
+                    )));
+                }
+            } else if step.step != expected {
                 return Err(EngineError::Message(format!(
                     "proof step {i} is {}, expected {expected}",
                     step.step
                 )));
-            }
-            if step.count != expected_counts[i] {
+            } else if step.count != expected_counts[i] {
                 return Err(EngineError::Message(format!(
                     "proof step {} has count {}, expected {}",
                     step.step, step.count, expected_counts[i]
@@ -450,7 +528,7 @@ impl CovenantProof {
                 self.expected_steps().len()
             )));
         }
-        let prefix = self.app_kind().fixture_prefix();
+        let prefix = self.fixture_bundle_prefix();
         let fixture_dir = proof_path
             .parent()
             .filter(|dir| dir.ends_with("fixtures"))
@@ -683,6 +761,11 @@ mod tests {
             app: "counter".into(),
             unlock_daa: None,
             allowed_recipient_hash: None,
+            payment_hash: None,
+            refund_daa: None,
+            buyer_hash: None,
+            seller_hash: None,
+            arbiter_hash: None,
             network: "testnet-10".into(),
             explorer: "https://explorer-tn10.kaspa.org".into(),
             funding_address: "kaspatest:qq".into(),
@@ -732,6 +815,11 @@ mod tests {
             app: "counter".into(),
             unlock_daa: None,
             allowed_recipient_hash: None,
+            payment_hash: None,
+            refund_daa: None,
+            buyer_hash: None,
+            seller_hash: None,
+            arbiter_hash: None,
             network: "testnet-10".into(),
             explorer: "https://explorer-tn10.kaspa.org".into(),
             funding_address: "kaspatest:qq".into(),
@@ -782,6 +870,11 @@ mod tests {
             app: "counter".into(),
             unlock_daa: None,
             allowed_recipient_hash: None,
+            payment_hash: None,
+            refund_daa: None,
+            buyer_hash: None,
+            seller_hash: None,
+            arbiter_hash: None,
             network: "testnet-10".into(),
             explorer: "https://explorer-tn10.kaspa.org".into(),
             funding_address: "kaspatest:qq".into(),
@@ -839,6 +932,11 @@ mod tests {
             app: "counter".into(),
             unlock_daa: None,
             allowed_recipient_hash: None,
+            payment_hash: None,
+            refund_daa: None,
+            buyer_hash: None,
+            seller_hash: None,
+            arbiter_hash: None,
             network: "testnet-10".into(),
             explorer: "https://explorer-tn10.kaspa.org".into(),
             funding_address: "kaspatest:qq".into(),
@@ -915,6 +1013,11 @@ mod tests {
             app: "counter".into(),
             unlock_daa: None,
             allowed_recipient_hash: None,
+            payment_hash: None,
+            refund_daa: None,
+            buyer_hash: None,
+            seller_hash: None,
+            arbiter_hash: None,
             network: "testnet-10".into(),
             explorer: "https://explorer-tn10.kaspa.org".into(),
             funding_address: "kaspatest:qq".into(),
@@ -974,6 +1077,11 @@ mod tests {
             app: "timelock_vault".into(),
             unlock_daa: Some(1_000_000),
             allowed_recipient_hash: None,
+            payment_hash: None,
+            refund_daa: None,
+            buyer_hash: None,
+            seller_hash: None,
+            arbiter_hash: None,
             network: "testnet-10".into(),
             explorer: "https://explorer-tn10.kaspa.org".into(),
             funding_address: "kaspatest:qq".into(),
@@ -1007,6 +1115,11 @@ mod tests {
             app: "restricted_swap".into(),
             unlock_daa: None,
             allowed_recipient_hash: Some(0x5357_4150),
+            payment_hash: None,
+            refund_daa: None,
+            buyer_hash: None,
+            seller_hash: None,
+            arbiter_hash: None,
             network: "testnet-10".into(),
             explorer: "https://explorer-tn10.kaspa.org".into(),
             funding_address: "kaspatest:qq".into(),
@@ -1032,6 +1145,195 @@ mod tests {
         proof.validate().unwrap();
         assert!(proof.is_complete());
         assert_eq!(proof.app_kind(), ProofApp::RestrictedSwap);
+    }
+
+    #[test]
+    fn htlc_profile_validates_two_steps() {
+        let proof = CovenantProof {
+            app: "htlc".into(),
+            unlock_daa: None,
+            allowed_recipient_hash: None,
+            payment_hash: Some(0x4854_4C43),
+            refund_daa: Some(2_000_000),
+            buyer_hash: None,
+            seller_hash: None,
+            arbiter_hash: None,
+            network: "testnet-10".into(),
+            explorer: "https://explorer-tn10.kaspa.org".into(),
+            funding_address: "kaspatest:qq".into(),
+            steps: vec![
+                CovenantProofStep {
+                    step: "genesis".into(),
+                    count: 0,
+                    txid: "aa".into(),
+                    covenant_id: "cc".into(),
+                    output_index: Some(0),
+                    explorer: None,
+                },
+                CovenantProofStep {
+                    step: "claim".into(),
+                    count: 1,
+                    txid: "bb".into(),
+                    covenant_id: "cc".into(),
+                    output_index: Some(0),
+                    explorer: None,
+                },
+            ],
+        };
+        proof.validate().unwrap();
+        assert!(proof.is_complete());
+        assert_eq!(proof.app_kind(), ProofApp::Htlc);
+    }
+
+    #[test]
+    fn escrow_2of3_profile_validates_two_steps() {
+        let proof = CovenantProof {
+            app: "escrow_2of3".into(),
+            unlock_daa: None,
+            allowed_recipient_hash: None,
+            payment_hash: None,
+            refund_daa: Some(2_000_000),
+            buyer_hash: Some(0x4255_5945),
+            seller_hash: Some(0x5345_4C4C),
+            arbiter_hash: Some(0x4152_4220),
+            network: "testnet-10".into(),
+            explorer: "https://explorer-tn10.kaspa.org".into(),
+            funding_address: "kaspatest:qq".into(),
+            steps: vec![
+                CovenantProofStep {
+                    step: "genesis".into(),
+                    count: 0,
+                    txid: "aa".into(),
+                    covenant_id: "cc".into(),
+                    output_index: Some(0),
+                    explorer: None,
+                },
+                CovenantProofStep {
+                    step: "release_seller".into(),
+                    count: 1,
+                    txid: "bb".into(),
+                    covenant_id: "cc".into(),
+                    output_index: Some(0),
+                    explorer: None,
+                },
+            ],
+        };
+        proof.validate().unwrap();
+        assert!(proof.is_complete());
+        assert_eq!(proof.app_kind(), ProofApp::Escrow2of3);
+        assert_eq!(proof.fixture_bundle_prefix(), "tn10-escrow-2of3");
+    }
+
+    #[test]
+    fn escrow_2of3_timeout_profile_validates_two_steps() {
+        let proof = CovenantProof {
+            app: "escrow_2of3".into(),
+            unlock_daa: None,
+            allowed_recipient_hash: None,
+            payment_hash: None,
+            refund_daa: Some(2_000_000),
+            buyer_hash: Some(0x4255_5945),
+            seller_hash: Some(0x5345_4C4C),
+            arbiter_hash: Some(0x4152_4220),
+            network: "testnet-10".into(),
+            explorer: "https://explorer-tn10.kaspa.org".into(),
+            funding_address: "kaspatest:qq".into(),
+            steps: vec![
+                CovenantProofStep {
+                    step: "genesis".into(),
+                    count: 0,
+                    txid: "aa".into(),
+                    covenant_id: "cc".into(),
+                    output_index: Some(0),
+                    explorer: None,
+                },
+                CovenantProofStep {
+                    step: "timeout_to_buyer".into(),
+                    count: 3,
+                    txid: "bb".into(),
+                    covenant_id: "cc".into(),
+                    output_index: Some(0),
+                    explorer: None,
+                },
+            ],
+        };
+        proof.validate().unwrap();
+        assert!(proof.is_complete());
+        assert_eq!(proof.app_kind(), ProofApp::Escrow2of3);
+    }
+
+    #[test]
+    fn htlc_refund_fixture_bundle_prefix() {
+        let proof = CovenantProof {
+            app: "htlc".into(),
+            unlock_daa: None,
+            allowed_recipient_hash: None,
+            payment_hash: Some(0x4854_4C43),
+            refund_daa: Some(2_000_100),
+            buyer_hash: None,
+            seller_hash: None,
+            arbiter_hash: None,
+            network: "testnet-10".into(),
+            explorer: "https://explorer-tn10.kaspa.org".into(),
+            funding_address: "kaspatest:qq".into(),
+            steps: vec![
+                CovenantProofStep {
+                    step: "genesis".into(),
+                    count: 0,
+                    txid: "aa".into(),
+                    covenant_id: "cc".into(),
+                    output_index: Some(0),
+                    explorer: None,
+                },
+                CovenantProofStep {
+                    step: "refund".into(),
+                    count: 2,
+                    txid: "bb".into(),
+                    covenant_id: "cc".into(),
+                    output_index: Some(0),
+                    explorer: None,
+                },
+            ],
+        };
+        assert_eq!(proof.fixture_bundle_prefix(), "tn10-htlc-refund");
+    }
+
+    #[test]
+    fn htlc_refund_profile_validates_two_steps() {
+        let proof = CovenantProof {
+            app: "htlc".into(),
+            unlock_daa: None,
+            allowed_recipient_hash: None,
+            payment_hash: Some(0x4854_4C43),
+            refund_daa: Some(2_000_100),
+            buyer_hash: None,
+            seller_hash: None,
+            arbiter_hash: None,
+            network: "testnet-10".into(),
+            explorer: "https://explorer-tn10.kaspa.org".into(),
+            funding_address: "kaspatest:qq".into(),
+            steps: vec![
+                CovenantProofStep {
+                    step: "genesis".into(),
+                    count: 0,
+                    txid: "aa".into(),
+                    covenant_id: "cc".into(),
+                    output_index: Some(0),
+                    explorer: None,
+                },
+                CovenantProofStep {
+                    step: "refund".into(),
+                    count: 2,
+                    txid: "bb".into(),
+                    covenant_id: "cc".into(),
+                    output_index: Some(0),
+                    explorer: None,
+                },
+            ],
+        };
+        proof.validate().unwrap();
+        assert!(proof.is_complete());
+        assert_eq!(proof.app_kind(), ProofApp::Htlc);
     }
 
     #[test]
