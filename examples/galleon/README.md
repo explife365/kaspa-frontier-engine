@@ -38,6 +38,24 @@ python examples/galleon_pool.py --pool 0xDEPLOYED --quote 1.0 --zero-for-one
 
 Not Uniswap. Not production liquidity. Rehearsal only on Galleon testnet.
 
+### Cash-flow rehearsal (Sep 2026)
+
+Three parallel revenue paths — all testnet, not consensus:
+
+| Product | Contract | Fee | Python |
+|---------|----------|-----|--------|
+| Fee AMM | `GalleonFeePool.sol` (30 bps; 50% to treasury) | swap fees | `galleon_fee_pool_deploy.py`, `galleon_fee_pool.py` |
+| Bridge relayer | `HtlcBridgeFactory.sol` + `HtlcBridgeVaultSha256.sol` | 1% on claim | `galleon_bridge_factory_deploy.py`, `galleon_bridge_relayer.py` |
+| Integrator API | n/a (hosted status) | SaaS rehearsal | `integrator_api.py` (`GET /v1/status`, `/v1/adoption`, `/v1/fixtures`) |
+
+```bat
+forge test --match-contract GalleonFeePoolTest
+forge test --match-contract HtlcBridgeFactoryTest
+python examples/galleon_fee_pool_deploy.py --simulate
+python examples/galleon_bridge_factory_deploy.py --simulate
+python examples/integrator_api.py --port 8787
+```
+
 The official faucet is a shared test resource. Use one wallet, respect daily
 limits, and do not automate IP rotation or multi-account limit bypasses.
 

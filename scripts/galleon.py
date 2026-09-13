@@ -32,6 +32,10 @@ GALLEON_GTEST = "0xbc5e27ab3ce2edb243593cda2437e5b30e0d5d7d"
 GALLEON_WRAPPED_IKAS = "0x7331b0a33ac9aa92f506f057bfaa049ea133f77f"
 # Populated in kaspa.env after examples/galleon_pool_deploy.py --broadcast
 GALLEON_MINI_POOL = ""
+# Populated after examples/galleon_fee_pool_deploy.py --broadcast
+GALLEON_FEE_POOL = ""
+# Populated after examples/galleon_bridge_factory_deploy.py --broadcast
+GALLEON_BRIDGE_FACTORY = ""
 # Canonical Circle USDC on Ethereum. Circle has not listed Galleon (38836).
 CIRCLE_USDC_ETHEREUM = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
 CIRCLE_USDC_ON_GALLEON = None
