@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kaspa Frontier — DAG Leader Dashboard</title>
+  <style>
+    :root {
+      --bg: #0a0e14;
+      --panel: #121820;
+      --border: #243044;
+      --text: #e8eef7;
+      --muted: #8b9cb3;
+      --accent: #49c6ff;
+      --success: #3dd68c;
+      --warn: #f0b429;
+      --danger: #ff6b6b;
+      --font: "Segoe UI", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    header {
+      padding: 2rem clamp(1rem, 4vw, 3rem);
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, #0f1520 0%, var(--bg) 100%);
+    }
+    h1 { margin: 0 0 0.5rem; font-size: clamp(1.5rem, 3vw, 2.2rem); }
+    .tag { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.75rem; margin-right: 0.4rem; border: 1px solid var(--border); }
+    .tag.live { border-color: var(--success); color: var(--success); }
+    .tag.shim { border-color: var(--warn); color: var(--warn); }
+    main { padding: 2rem clamp(1rem, 4vw, 3rem); max-width: 1200px; margin: 0 auto; }
+    .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem;
+    }
+    .stat { font-size: 2rem; font-weight: 700; color: var(--accent); }
+    .stat small { display: block; font-size: 0.8rem; color: var(--muted); font-weight: 400; }
+    h2 { margin: 2rem 0 1rem; font-size: 1.2rem; }
+    .dag-wrap { display: flex; flex-wrap: wrap; gap: 2rem; align-items: center; }
+    svg text { fill: var(--muted); font-size: 12px; font-family: var(--font); }
+    .bar-row { display: flex; align-items: center; gap: 0.75rem; margin: 0.5rem 0; }
+    .bar-label { width: 140px; font-size: 0.85rem; color: var(--muted); }
+    .bar-track { flex: 1; height: 10px; background: #1a2230; border-radius: 4px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 4px; background: var(--accent); }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th, td { text-align: left; padding: 0.65rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; }
+    code { font-size: 0.8rem; color: var(--accent); }
+    .pulse { animation: pulse 2s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
+    footer { padding: 2rem; color: var(--muted); font-size: 0.8rem; text-align: center; }
+    #api-status { margin-top: 1rem; padding: 0.75rem; border-radius: 6px; background: #1a2230; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Kaspa Frontier</h1>
+    <p style="color: var(--muted); max-width: 720px;">
+      Why Kaspa leads on throughput: GHOSTDAG accepts parallel blocks at 10 BPS.
+      Toccata covenants on L1. Integrators use shims today; swap to native RPC/SDK when blockers clear.
+    </p>
+    <span class="tag live">10 BPS live</span>
+    <span class="tag live">Toccata L1</span>
+    <span class="tag shim">TN10 rehearsal</span>
+  </header>
+
+  <main>
+    <div class="grid">
+      <div class="card"><div class="stat">10<small>BPS block cadence (GHOSTDAG)</small></div></div>
+      <div class="card"><div class="stat">DAG<small>Parallel tips, not one chain</small></div></div>
+      <div class="card"><div class="stat">8/8<small>Covenant fixtures verified</small></div></div>
+      <div class="card"><div class="stat">2/2<small>Owned-node ingestion gate</small></div></div>
+    </div>
+
+    <h2>BlockDAG vs linear chain</h2>
+    <div class="card dag-wrap">
+      <svg width="380" height="160" aria-hidden="true">
+        <text x="8" y="20">Linear (1 tip)</text>
+        <rect x="16" y="32" width="44" height="22" rx="4" fill="#3a4a60" opacity="0.5"/>
+        <rect x="68" y="32" width="44" height="22" rx="4" fill="#3a4a60" opacity="0.5"/>
+        <rect x="120" y="32" width="44" height="22" rx="4" fill="#3a4a60" opacity="0.5"/>
+        <rect x="172" y="32" width="44" height="22" rx="4" fill="#3a4a60" opacity="0.5"/>
+        <text x="8" y="90">Kaspa DAG</text>
+        <line x1="24" y1="110" x2="100" y2="110" stroke="#49c6ff" stroke-width="2"/>
+        <line x1="100" y1="110" x2="180" y2="98" stroke="#49c6ff" stroke-width="2"/>
+        <line x1="100" y1="110" x2="180" y2="122" stroke="#49c6ff" stroke-width="2"/>
+        <line x1="180" y1="98" x2="260" y2="110" stroke="#49c6ff" stroke-width="2"/>
+        <line x1="180" y1="122" x2="260" y2="110" stroke="#49c6ff" stroke-width="2"/>
+        <circle cx="24" cy="110" r="9" fill="#49c6ff" class="pulse"/>
+        <circle cx="100" cy="110" r="9" fill="#49c6ff"/>
+        <circle cx="180" cy="98" r="8" fill="#3dd68c"/>
+        <circle cx="180" cy="122" r="8" fill="#3dd68c"/>
+        <circle cx="260" cy="110" r="9" fill="#49c6ff"/>
+      </svg>
+      <div style="flex:1; min-width: 240px; color: var(--muted); font-size: 0.9rem;">
+        Multiple blocks per second without orphaning the DAG. That is the structural reason Kaspa
+        scales PoW differently from single-tip chains — not marketing, architecture.
+      </div>
+    </div>
+
+    <h2>Inclusion horizon (illustrative)</h2>
+    <div class="card">
+      <div class="bar-row"><span class="bar-label">Kaspa ~0.1s</span><div class="bar-track"><div class="bar-fill" style="width:2%"></div></div></div>
+      <div class="bar-row"><span class="bar-label">Ethereum ~12s</span><div class="bar-track"><div class="bar-fill" style="width:24%; background: var(--warn)"></div></div></div>
+      <div class="bar-row"><span class="bar-label">Bitcoin ~600s</span><div class="bar-track"><div class="bar-fill" style="width:100%; background: var(--danger)"></div></div></div>
+      <p style="font-size:0.8rem; color: var(--muted); margin: 0.5rem 0 0;">Order-of-magnitude education chart — not a live benchmark.</p>
+    </div>
+
+    <h2>Dev blockers → shim → native swap</h2>
+    <div class="card" style="overflow-x:auto">
+      <table>
+        <thead>
+          <tr><th>Blocker</th><th>Workaround now</th><th>When unblocked</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Covenant UTXO lookup</td><td><code>kascov</code> + <code>tn10-covenant-rpc</code></td><td>rusty-kaspa#1128</td></tr>
+          <tr><td>SDK covenant broadcast</td><td><code>TN10_SDK_DEV_PATCH=1</code></td><td>kaspa-python-sdk#78 wheel</td></tr>
+          <tr><td>Deposit credit</td><td><code>--public-only</code> scorecard</td><td>2/2 owned kaspad gate</td></tr>
+          <tr><td>L1 DeFi UX</td><td>Galleon L2 + games</td><td>Toccata on L1 (live)</td></tr>
+          <tr><td>Public wRPC</td><td>Loopback + tunnel</td><td>Hosted nodes per integrator</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Live shim status</h2>
+    <div id="api-status">Loading from integrator API (start with <code>python examples/integrator_api.py</code>)…</div>
+  </main>
+
+  <footer>
+    kaspa-frontier-engine · testnet rehearsal · not consensus · gTEST is not USD
+  </footer>
+
+  <script>
+    (async function () {
+      const el = document.getElementById("api-status");
+      try {
+        const r = await fetch("http://127.0.0.1:8787/v1/blockers");
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const j = await r.json();
+        const lines = (j.blockers || []).map(b =>
+          `<strong>${b.id}</strong>: ${b.shim} → <em>${b.unblock}</em>`
+        );
+        el.innerHTML = `<span style="color:var(--success)">API connected</span> · ${j.shims_active} shims active · demo ready: ${j.ready_for_demo}<br>` + lines.join("<br>");
+      } catch (e) {
+        el.innerHTML = `API offline — run <code>python examples/integrator_api.py</code> then refresh. Static dashboard still works.<br><code>${e.message}</code>`;
+      }
+    })();
+  </script>
+</body>
+</html>

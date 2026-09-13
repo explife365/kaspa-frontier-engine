@@ -225,6 +225,10 @@ def timeout_playbook() -> dict[str, Any]:
     }
 
 
+def blockers_card() -> dict[str, Any]:
+    return _run_json([sys.executable, str(ROOT / "scripts" / "integrator_shims.py"), "--json"], timeout=180)
+
+
 def build_report(skip_gate: bool) -> dict[str, Any]:
     fixtures = [verify_fixture_offline(name) for name in FIXTURES]
     fixtures_ok = all(f.get("ok") for f in fixtures)
@@ -248,6 +252,7 @@ def build_report(skip_gate: bool) -> dict[str, Any]:
             "pool": pool_status(),
         },
         "timeout_playbook": timeout_playbook(),
+        "blocker_shims": blockers_card(),
         "ready_for_cex_demo": gate_ok and fixtures_ok and bool(sdk.get("readyWithDevPatch")),
     }
 
@@ -293,6 +298,11 @@ def print_human(report: dict[str, Any]) -> None:
     print(f"  sha256 L1 refund published: {tp['sha256_l1_refund_published']}")
     if not tp["sha256_l1_refund_published"]:
         print(f"  sha256 L1 refund cmd: {tp['sha256_l1_refund_command']}")
+    shims = report.get("blocker_shims") or {}
+    if shims.get("blockers"):
+        print(f"\nblocker shims  {shims.get('shims_active', '?')} active (swap when native ships)")
+        for row in shims["blockers"][:3]:
+            print(f"  {row['id']}: {row['shim'][:60]}")
     print(f"\ncex demo ready  {report['ready_for_cex_demo']}")
 
 

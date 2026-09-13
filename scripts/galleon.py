@@ -36,6 +36,10 @@ GALLEON_MINI_POOL = ""
 GALLEON_FEE_POOL = ""
 # Populated after examples/galleon_bridge_factory_deploy.py --broadcast
 GALLEON_BRIDGE_FACTORY = ""
+# Populated after examples/galleon_games_deploy.py --broadcast
+GALLEON_COIN_FLIP = ""
+GALLEON_DICE = ""
+GALLEON_JACKPOT = ""
 # Canonical Circle USDC on Ethereum. Circle has not listed Galleon (38836).
 CIRCLE_USDC_ETHEREUM = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
 CIRCLE_USDC_ON_GALLEON = None

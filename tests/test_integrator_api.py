@@ -49,6 +49,31 @@ class IntegratorApiTests(unittest.TestCase):
         self.assertIn("items", body)
         self.assertEqual(body.get("count"), 8)
 
+    def test_cex_wallets(self) -> None:
+        body = self._get("/v1/cex/wallets")
+        self.assertTrue(body.get("ok"))
+        self.assertGreaterEqual(body.get("count", 0), 1)
+
+    def test_cex_readiness(self) -> None:
+        body = self._get("/v1/cex/readiness?skip_gate=1")
+        self.assertTrue(body.get("ok"))
+        self.assertIn("checks", body)
+
+    def test_onboard_nodes(self) -> None:
+        body = self._get("/v1/onboard?path=nodes")
+        self.assertTrue(body.get("ok"))
+        self.assertEqual(body.get("id"), "nodes")
+
+    def test_cex_validate_offline_dex(self) -> None:
+        body = self._get("/v1/cex/validate?skip_gate=1&dex=0")
+        self.assertIn("scenarios", body)
+        self.assertGreaterEqual(body.get("total", 0), 4)
+
+    def test_dex_swap_dry_run_rejects_broadcast(self) -> None:
+        body = self._get("/v1/dex/swap?sell=0.5&buy=wiKAS&dry_run=0")
+        self.assertFalse(body.get("ok"))
+        self.assertEqual(body.get("error", "").lower().find("broadcast"), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

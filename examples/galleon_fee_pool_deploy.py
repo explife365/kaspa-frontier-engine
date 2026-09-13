@@ -22,8 +22,12 @@ from galleon import GALLEON_CHAIN_ID, GALLEON_EXPLORER, GALLEON_GTEST, GALLEON_M
 from galleon_pool_deploy import galleon_key  # noqa: E402
 from kaspa_env import load_kaspa_env, upsert_kaspa_env  # noqa: E402
 
+sys.path.insert(0, str(ROOT / "examples"))
+from galleon_pool_seed import send_create  # noqa: E402
+
 FEE_BPS = 30
 PROTOCOL_SHARE_BPS = 5000
+DEPLOY_GAS = 1_600_000
 
 
 def ensure_artifact() -> dict:
@@ -44,6 +48,21 @@ def encode_fee_pool_args(token0: str, token1: str, treasury: str) -> str:
 def deploy_data(artifact: dict, token0: str, token1: str, treasury: str) -> str:
     bytecode = artifact["bytecode"]["object"].removeprefix("0x")
     return "0x" + bytecode + encode_fee_pool_args(token0, token1, treasury)
+
+
+def python_broadcast(data: str) -> str:
+    from eth_account import Account
+    from eth_utils import keccak, to_checksum_address
+    from rlp import encode as rlp_encode
+
+    from galleon_faucet import rpc_hex
+
+    key = galleon_key()
+    acct = Account.from_key(key)
+    nonce = int(rpc_hex("eth_getTransactionCount", [acct.address, "pending"]), 16)
+    send_create(key, data, DEPLOY_GAS)
+    pool = keccak(rlp_encode([bytes.fromhex(acct.address[2:]), nonce]))[-20:].hex()
+    return to_checksum_address("0x" + pool)
 
 
 def forge_broadcast() -> str:
@@ -78,6 +97,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Deploy GalleonFeePool")
     parser.add_argument("--simulate", action="store_true")
     parser.add_argument("--broadcast", action="store_true")
+    parser.add_argument("--python", action="store_true", help="broadcast via eth_sendRawTransaction (default with --broadcast)")
+    parser.add_argument("--forge", action="store_true", help="broadcast via forge script instead of Python")
     parser.add_argument("--token0", default=GALLEON_GTEST)
     parser.add_argument("--token1", default=GALLEON_WRAPPED_IKAS or "")
     args = parser.parse_args()
@@ -99,7 +120,7 @@ def main() -> int:
         print("simulate OK")
         return 0
 
-    pool = forge_broadcast()
+    pool = forge_broadcast() if args.forge else python_broadcast(data)
     print(f"pool  {pool}")
     print(f"      {GALLEON_EXPLORER}/address/{pool}")
     upsert_kaspa_env({"GALLEON_FEE_POOL": pool}, ROOT)

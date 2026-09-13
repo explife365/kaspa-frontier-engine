@@ -77,6 +77,32 @@ def allowance_of(token: str, owner: str, spender: str) -> int:
     return decode_uint256(eth_call(GALLEON_RPC, token, data))
 
 
+def send_create(key: str, data: str, gas: int) -> str:
+    src = address_of(key)
+    bal = int(rpc_hex("eth_getBalance", [src, "latest"]), 16)
+    if not fits_balance(bal, gas, GALLEON_MIN_GAS_WEI, 0):
+        need = gas * GALLEON_MIN_GAS_WEI
+        raise RuntimeError(f"would be dropped on Igra: have {bal} wei, need {need}")
+    nonce = int(rpc_hex("eth_getTransactionCount", [src, "pending"]), 16)
+    tx = {
+        "chainId": GALLEON_CHAIN_ID,
+        "nonce": nonce,
+        "to": None,
+        "value": 0,
+        "gas": gas,
+        "gasPrice": GALLEON_MIN_GAS_WEI,
+        "data": data,
+    }
+    signed = Account.sign_transaction(tx, key)
+    raw = signed.raw_transaction.hex()
+    if not raw.startswith("0x"):
+        raw = "0x" + raw
+    tx_hash = rpc_hex("eth_sendRawTransaction", [raw])
+    print(f"create tx  {tx_hash}")
+    print(f"           {GALLEON_EXPLORER}/tx/{tx_hash}")
+    return tx_hash
+
+
 def send_contract(
     key: str,
     to: str,

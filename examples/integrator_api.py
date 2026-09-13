@@ -8,6 +8,15 @@ Endpoints:
   GET /v1/status?skip_gate=1
   GET /v1/adoption?public_only=1
   GET /v1/fixtures
+  GET /v1/blockers
+  GET /v1/dex/status
+  GET /v1/dex/quote?sell=1.0&buy=wiKAS
+  GET /v1/dex/swap?sell=0.5&buy=wiKAS&dry_run=1
+  GET /v1/dex/pairs
+  GET /v1/cex/readiness?skip_gate=1
+  GET /v1/cex/wallets
+  GET /v1/cex/validate?skip_gate=1
+  GET /v1/onboard?path=nodes
 
 Not production SaaS. No auth. Bind loopback by default.
 """
@@ -83,6 +92,108 @@ class IntegratorHandler(BaseHTTPRequestHandler):
             self._json(200, adoption_card(skip_gate))
             return
 
+        if path == "/v1/blockers":
+            from integrator_shims import build_report as shim_report
+
+            self._json(200, shim_report())
+            return
+
+        if path == "/v1/dex/status":
+            from galleon_dex_common import dex_status
+
+            try:
+                self._json(200, dex_status())
+            except Exception as err:  # noqa: BLE001
+                self._json(503, {"ok": False, "error": str(err)})
+            return
+
+        if path == "/v1/dex/quote":
+            from galleon_dex_common import dex_quote
+
+            sell = qs.get("sell", [""])[0]
+            buy = qs.get("buy", ["wiKAS"])[0]
+            if not sell:
+                self._json(400, {"ok": False, "error": "sell query param required"})
+                return
+            try:
+                slippage = int(qs.get("slippage_bps", ["50"])[0])
+                zero_for_one = buy.lower() in ("wikas", "wiKAS".lower(), "token1", "1")
+                body = dex_quote(float(sell), zero_for_one, slippage_bps=slippage)
+                body["ok"] = True
+                self._json(200, body)
+            except Exception as err:  # noqa: BLE001
+                self._json(400, {"ok": False, "error": str(err)})
+            return
+
+        if path == "/v1/dex/swap":
+            from galleon_dex_common import dex_swap_plan
+
+            sell = qs.get("sell", [""])[0]
+            buy = qs.get("buy", ["wiKAS"])[0]
+            dry_run = qs.get("dry_run", ["1"])[0] in ("1", "true", "yes")
+            if not sell:
+                self._json(400, {"ok": False, "error": "sell query param required"})
+                return
+            if not dry_run:
+                self._json(
+                    403,
+                    {
+                        "ok": False,
+                        "error": "broadcast swaps disabled on integrator API; use dry_run=1 or galleon_dex.py",
+                    },
+                )
+                return
+            try:
+                slippage = int(qs.get("slippage_bps", ["50"])[0])
+                body = dex_swap_plan(float(sell), buy, slippage_bps=slippage)
+                body["ok"] = True
+                self._json(200, body)
+            except Exception as err:  # noqa: BLE001
+                self._json(400, {"ok": False, "error": str(err)})
+            return
+
+        if path == "/v1/dex/pairs":
+            from cex_api_common import dex_pairs
+
+            try:
+                self._json(200, dex_pairs())
+            except Exception as err:  # noqa: BLE001
+                self._json(503, {"ok": False, "error": str(err)})
+            return
+
+        if path == "/v1/cex/readiness":
+            from cex_api_common import cex_readiness
+
+            skip_gate = qs.get("skip_gate", ["1"])[0] in ("1", "true", "yes")
+            body = cex_readiness(skip_gate=skip_gate)
+            body["ok"] = True
+            self._json(200, body)
+            return
+
+        if path == "/v1/cex/wallets":
+            from cex_api_common import cex_wallets
+
+            self._json(200, {"ok": True, **cex_wallets()})
+            return
+
+        if path == "/v1/cex/validate":
+            from cex_api_common import validate_scenarios
+
+            skip_gate = qs.get("skip_gate", ["1"])[0] in ("1", "true", "yes")
+            live_dex = qs.get("dex", ["1"])[0] not in ("0", "false", "no")
+            self._json(200, validate_scenarios(skip_gate=skip_gate, live_dex=live_dex))
+            return
+
+        if path == "/v1/onboard":
+            from cex_api_common import onboard_card
+
+            path_id = qs.get("path", ["rest"])[0]
+            try:
+                self._json(200, onboard_card(path_id))
+            except ValueError as err:
+                self._json(400, {"ok": False, "error": str(err)})
+            return
+
         if path == "/v1/fixtures":
             items = [verify_fixture_offline(name) for name in FIXTURES]
             self._json(
@@ -95,7 +206,28 @@ class IntegratorHandler(BaseHTTPRequestHandler):
             )
             return
 
-        self._json(404, {"ok": False, "error": "not found", "paths": ["/health", "/v1/status", "/v1/adoption", "/v1/fixtures"]})
+        self._json(
+            404,
+            {
+                "ok": False,
+                "error": "not found",
+                "paths": [
+                    "/health",
+                    "/v1/status",
+                    "/v1/adoption",
+                    "/v1/fixtures",
+                    "/v1/blockers",
+                    "/v1/dex/status",
+                    "/v1/dex/quote?sell=1.0&buy=wiKAS",
+                    "/v1/dex/swap?sell=0.5&buy=wiKAS&dry_run=1",
+                    "/v1/dex/pairs",
+                    "/v1/cex/readiness",
+                    "/v1/cex/wallets",
+                    "/v1/cex/validate",
+                    "/v1/onboard?path=nodes",
+                ],
+            },
+        )
 
     def log_message(self, fmt: str, *args: object) -> None:
         sys.stderr.write(f"{self.address_string()} - {fmt % args}\n")

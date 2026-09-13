@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kaspa Dev Portal — build faster</title>
+  <style>
+    :root { --bg:#0a0e14; --card:#121820; --border:#243044; --text:#e8eef7; --muted:#8b9cb3; --accent:#49c6ff; --ok:#3dd68c; --font:system-ui,sans-serif; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:var(--font); background:var(--bg); color:var(--text); }
+    header { padding:2rem; border-bottom:1px solid var(--border); }
+    h1 { margin:0 0 .5rem; }
+    .sub { color:var(--muted); max-width:640px; }
+    main { padding:2rem; max-width:960px; margin:0 auto; }
+    .paths { display:grid; gap:1rem; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); }
+    .path { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:1.25rem; cursor:pointer; transition:border-color .15s; }
+    .path:hover, .path.active { border-color:var(--accent); }
+    .path h2 { margin:0 0 .5rem; font-size:1rem; }
+    .path p { margin:0; font-size:.85rem; color:var(--muted); }
+    .steps { margin-top:1.5rem; background:var(--card); border:1px solid var(--border); border-radius:8px; padding:1rem 1.25rem; }
+    .steps ol { margin:.5rem 0 0; padding-left:1.25rem; }
+    .steps li { margin:.35rem 0; font-size:.9rem; }
+    .steps code { color:var(--accent); font-size:.85rem; }
+    .links { margin-top:2rem; display:flex; flex-wrap:wrap; gap:.75rem; }
+    .links a { color:var(--accent); text-decoration:none; border:1px solid var(--border); padding:.4rem .8rem; border-radius:6px; font-size:.85rem; }
+    .links a:hover { border-color:var(--accent); }
+    #status { margin-top:1rem; font-size:.85rem; color:var(--muted); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Kaspa Dev Portal</h1>
+    <p class="sub">Pick a path. Shims today, native RPC tomorrow. Text guide, video script, and audio brief in-repo.</p>
+  </header>
+  <main>
+    <div class="paths" id="paths"></div>
+    <div class="steps" id="detail">
+      <strong id="path-title">Select a path</strong>
+      <ol id="path-steps"></ol>
+      <p id="path-note" style="color:var(--muted);font-size:.85rem;margin-top:.75rem;"></p>
+    </div>
+    <div class="links">
+      <a href="kaspa_frontier_dashboard.html">Frontier dashboard</a>
+      <a href="../docs/dev_build_faster.md">Text guide</a>
+      <a href="../scripts/media/dev_video_script.txt">Video script</a>
+      <a href="../scripts/media/dev_audio_script.txt">Audio script</a>
+      <a href="https://github.com/explife365/kaspa-frontier-engine">GitHub</a>
+    </div>
+    <div id="status"></div>
+  </main>
+  <script>
+    const PATHS = {
+      rest: { title: "No disk — REST + proofs", min: 5, note: "Do not credit deposits on public REST." },
+      galleon: { title: "Galleon L2 games", min: 15, note: "gTEST is not USD." },
+      nodes: { title: "Owned kaspad gate", min: 60, note: "2/2 healthy before deposit credit." },
+      covenant: { title: "L1 SilverScript", min: 30, note: "SDK#78 + #1128 shims active." }
+    };
+    const pathsEl = document.getElementById("paths");
+    const stepsEl = document.getElementById("path-steps");
+    const titleEl = document.getElementById("path-title");
+    const noteEl = document.getElementById("path-note");
+    const statusEl = document.getElementById("status");
+
+    function renderPath(id, data) {
+      titleEl.textContent = data.title + " (~" + data.minutes + " min)";
+      noteEl.textContent = data.blocker_note || "";
+      stepsEl.innerHTML = (data.steps || []).map(s => "<li><code>" + s + "</code></li>").join("");
+      document.querySelectorAll(".path").forEach(p => p.classList.toggle("active", p.dataset.id === id));
+    }
+
+    Object.entries(PATHS).forEach(([id, meta]) => {
+      const d = document.createElement("div");
+      d.className = "path";
+      d.dataset.id = id;
+      d.innerHTML = "<h2>" + meta.title + "</h2><p>~"+meta.min+" min</p>";
+      d.onclick = () => loadPath(id);
+      pathsEl.appendChild(d);
+    });
+
+    async function loadPath(id) {
+      try {
+        const r = await fetch("http://127.0.0.1:8787/v1/onboard?path=" + id);
+        const j = await r.json();
+        renderPath(id, j);
+        statusEl.textContent = "Live from integrator API.";
+      } catch (e) {
+        statusEl.textContent = "API offline — run: python examples/integrator_api.py";
+        renderPath(id, { title: PATHS[id].title, minutes: PATHS[id].min, blocker_note: PATHS[id].note, steps: ["python examples/dev_quickstart.py --path " + id] });
+      }
+    }
+    loadPath("rest");
+  </script>
+</body>
+</html>

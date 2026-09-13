@@ -56,6 +56,44 @@ python examples/galleon_bridge_factory_deploy.py --simulate
 python examples/integrator_api.py --port 8787
 ```
 
+### Galleon DEX (gTEST / wiKAS)
+
+Unified swap hub on the live MiniPool (or FeePool after deploy):
+
+```bat
+python examples/galleon_dex.py status
+python examples/galleon_dex.py quote --sell 1.0 --buy wiKAS
+python examples/galleon_dex.py swap --sell 0.5 --buy wiKAS --dry-run
+python examples/galleon_dex.py swap --sell 0.5 --buy wiKAS --broadcast
+python examples/galleon_dex.py serve
+```
+
+Open `examples/galleon_dex.html` while `serve` runs (quotes via `GET /v1/dex/quote`).
+
+Deploy fee-tier pool (30 bps, LP + treasury):
+
+```bat
+python examples/galleon_dex.py deploy-fee
+python examples/galleon_fee_pool.py --status
+```
+
+### DeFi games (community fun)
+
+| Game | Contract | CLI |
+|------|----------|-----|
+| Coin flip | `GalleonCoinFlip.sol` | `galleon_coin_flip.py` |
+| Dice | `GalleonDice.sol` | `galleon_dice.py` |
+| Jackpot | `GalleonJackpot.sol` | `galleon_jackpot.py` |
+| Parity quest | TN10 REST (no gas) | `parity_quest.py` |
+
+```bat
+forge test --match-contract GalleonGamesTest
+python examples/galleon_games.py list
+python examples/galleon_games_deploy.py --simulate
+```
+
+Demo randomness only — not production gambling.
+
 The official faucet is a shared test resource. Use one wallet, respect daily
 limits, and do not automate IP rotation or multi-account limit bypasses.
 
