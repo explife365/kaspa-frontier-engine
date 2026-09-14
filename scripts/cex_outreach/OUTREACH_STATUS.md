@@ -32,7 +32,7 @@ Do **not** retry `listing@bybit.com` from the same Gmail account repeatedly (can
 - [x] Outbox webhook deliver — 10/10 credit events → `http://127.0.0.1:18320/kaspa-events` (outbox empty)
 - [ ] **Discord** — paste `discord_funding_followup.txt` in funding thread (updated Sep 14 PM)
 - [ ] **Bybit** — LinkedIn / help form (`bybit_linkedin.txt`); do not resend listing@bybit.com
-- [x] **Video** — recorded (Sep 14 2026; script: `scripts/media/dev_video_script.txt`)
+- [x] **Video** — `C:\Users\Admin2\IONOS HiDrive\Build Files\Kaspa Video\out\kaspa_dev_quickstart.mp4` (~9.7 MB, Sep 14 2026)
 - [ ] **CEX day 5–7** (Sep 19–21) — `open_followup_drafts.ps1` if no reply
 
 Operator checklist: `powershell -File scripts/cex_outreach/run_remaining.ps1`

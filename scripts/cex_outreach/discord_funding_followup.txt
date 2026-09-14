@@ -15,7 +15,7 @@ Stack live on owned nodes — gate **2/2 green**, custody API on loopback `:8787
 - `tn10-integrator-api` — auth, deposits, outbox, withdrawals, gate (OpenAPI in repo)
 - Outbox webhook dry-run: **10/10** credit events delivered to local receiver with idempotency keys
 - Galleon jackpot round 0 drawn (testnet): https://explorer.galleon-testnet.igralabs.com/tx/0xd98011836bf1b979f0dcf9491f28b4d92df18aa632f38ea706a66a6c2eb12f25
-- 5-min integrator demo video recorded (attach in thread if useful)
+- Demo video (attach file): `C:\Users\Admin2\IONOS HiDrive\Build Files\Kaspa Video\out\kaspa_dev_quickstart.mp4`
 
 Exit codes in latest evidence JSON: ownedNodeGate=0, wrpcLive=0 (sdkGate=1 until computeBudget wheel publishes — known).
 

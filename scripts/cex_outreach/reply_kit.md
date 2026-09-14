@@ -8,6 +8,7 @@ Use when Gate, MEXC, KuCoin, or Bybit respond to the initial outreach.
 |----------|----------|
 | Evidence gist | https://gist.github.com/explife365/477afea386ddba43574c7cb841ad4c73 |
 | Repo | https://github.com/explife365/kaspa-frontier-engine |
+| Demo video | `C:\Users\Admin2\IONOS HiDrive\Build Files\Kaspa Video\out\kaspa_dev_quickstart.mp4` |
 | OpenAPI | `docs/integrator_openapi.yaml` (or live `GET /openapi.json`) |
 | Runbook | `docs/integrator_go_live.md` + `scripts/cex_production_runbook.md` |
 
