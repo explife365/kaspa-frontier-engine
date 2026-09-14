@@ -132,7 +132,7 @@ def print_human(path_id: str) -> None:
         print("\nLearn more (text / video / audio):")
         for kind, rel in media.items():
             print(f"  {kind:8} {rel}")
-    print("\nAPI: python examples/integrator_api.py  →  GET /v1/onboard?path=" + path_id)
+    print("\nAPI: python examples/integrator_api.py  ->  GET /v1/onboard?path=" + path_id)
 
 
 def main() -> int:

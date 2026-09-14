@@ -15,8 +15,10 @@ Not consensus. Not production mainnet custody without independent audit.
 Quick start:
 
 ```powershell
+powershell -File scripts/integrator_stack.ps1          # wrpc-live + API + receiver
+powershell -File scripts/integrator_stack.ps1 --status
 powershell -File scripts/integrator_go_live.ps1 --check
-powershell -File scripts/integrator_go_live.ps1 --api-only
+python examples/integrator_api.py                      # demo dashboard :8788
 ```
 
 ## Auth

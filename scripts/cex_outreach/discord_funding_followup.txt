@@ -2,7 +2,7 @@ Follow-up reply template (paste in Discord funding thread when someone asks for 
 
 ---
 
-Evidence pack artifacts (Sep 14 2026):
+Evidence pack artifacts (Sep 14 2026, stack live 2/2):
 - Gist: https://gist.github.com/explife365/477afea386ddba43574c7cb841ad4c73
 - Repo: https://github.com/explife365/kaspa-frontier-engine
 - Reproduce: `powershell -File scripts/integrator_evidence_pack.ps1`

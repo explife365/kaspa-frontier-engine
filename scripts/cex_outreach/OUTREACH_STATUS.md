@@ -25,8 +25,14 @@ Do **not** retry `listing@bybit.com` from the same Gmail account repeatedly (can
 ## Next actions
 
 - [x] All four listing emails sent (Sep 14 2026)
+- [x] Production stack running (`scripts/integrator_stack.ps1`) — gate 2/2, custody `:8787`, demo `:8788`
+- [x] Integrator keys generated (`scripts/integrator_gen_keys.py`) — handoff `.local/integrator_pilot_credentials.txt`
+- [x] Watchlist registered on custody API
+- [x] Jackpot auto-draw scheduled (`scripts/galleon_jackpot_draw_when_ready.ps1`, round ends `1789427323`)
 - [ ] Bybit LinkedIn / help form if no bounce receipt in Sent folder (`bybit_linkedin.txt`)
 - [ ] Monitor Discord funding thread; reply with `discord_funding_followup.txt`
-- [ ] Jackpot draw after `1789427323`
 - [ ] Record 5-min integrator demo (`scripts/media/dev_video_script.txt`)
-- [ ] Follow-up bump at day 5–7 if no reply (short thread reply + gist link)
+- [ ] Follow-up bump at day 5–7 (Sep 19–21 2026) if no reply — `followup_day5.txt` + `open_gmail_drafts.ps1`
+- [ ] Outbox webhook deliver when deposit DB not locked: `POST /v1/outbox/deliver` → `http://127.0.0.1:18320/kaspa-events`
+
+Operator checklist: `powershell -File scripts/cex_outreach/run_remaining.ps1`
