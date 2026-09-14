@@ -17,6 +17,7 @@ pub mod erc20;
 pub mod error;
 pub mod exchange;
 pub mod galleon;
+pub mod integrator_api;
 pub mod kascov;
 pub mod kasplex;
 pub mod kip2_sat;
@@ -43,7 +44,8 @@ pub use cex::{
 };
 pub use covenant::{CovenantError, CovenantPolicyEngine, NativeCovenantUtxo};
 pub use deposit_ledger::{
-    ClaimedLedgerEvent, DeliveryFailureOutcome, DepositLedger, LedgerEvent, OutboxEventStatus,
+    ClaimedLedgerEvent, DeliveryFailureOutcome, DepositLedger, DepositRecord, LedgerEvent,
+    OutboxEventStatus,
 };
 pub use erc20::Erc20Meta;
 pub use error::{EngineError, Result};
@@ -99,7 +101,9 @@ pub use telemetry::GhostdagTelemetry;
 pub use watch::{
     poll_durable_withdrawal, poll_withdrawal, withdrawal_utxos, DepositWatch, WatchTick,
 };
-pub use withdrawal_ledger::{WithdrawalLedger, WithdrawalRecord, WithdrawalState};
+pub use withdrawal_ledger::{
+    WithdrawalLedger, WithdrawalRecord, WithdrawalRecordView, WithdrawalState,
+};
 pub use wrpc::{
     apply_pending_journal_frames, decode_block_dag_info_response,
     decode_connected_peer_info_response, decode_notification, decode_server_info_response,

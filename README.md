@@ -44,6 +44,7 @@ Dev patch (`TN10_SDK_DEV_PATCH=1`, `scripts/kaspa_sdk_dev_patch.py`): wraps `Tra
 | `exchange` | Deposit tracker **and** outbound DAA confirmation (submit ≠ done) |
 | `tn10-kasplex` | Live Kasplex tokenlist / address balances / open mints (inscriptions, not USD) |
 | `tn10-outbox-receiver` | Transactional SQLite inbox that atomically deduplicates webhook keys |
+| `tn10-integrator-api` | Production CEX HTTP API (auth, deposits, outbox, withdrawals, gate) on loopback `:8787` |
 | `krc20` | Off-chain KRC-20 state machine **and** canonical Kasplex inscription JSON |
 | `covenant` | Timelock + destination policy. Refuses stub ZK |
 | `telemetry` | GHOSTDAG metrics from live difficulty. Does not claim DAGKnight |
@@ -126,6 +127,7 @@ cargo run --release --bin tn10-node-health
 cargo run --release --bin tn10-node-health -- --json --max-daa-lag 100
 cargo run --release --bin tn10-node-health -- --dual --min-healthy 2 --json
 powershell -File scripts/tn10_gate.ps1 -Json
+```
 
 **Node adoption (owned kaspad):** one-shot onboarding prints IBD stages, adoption scorecard, and next steps:
 
@@ -190,6 +192,23 @@ cargo run --release --bin tn10-outbox -- deliver https://127.0.0.1:18320/kaspa-e
 Remote production still keeps this process on loopback and terminates TLS in front of it
 (or uses these PEM flags). Do not bind 18320 on a public address.
 
+### Integrator HTTP API (CEX custody rehearsal)
+
+Production custody API (`tn10-integrator-api`, loopback `:8787`). Demo dashboard API
+(`examples/integrator_api.py`, `:8788` — status/DEX/games only, not custody):
+
+```powershell
+python scripts/integrator_gen_keys.py
+powershell -File scripts/integrator_go_live.ps1 --check
+powershell -File scripts/integrator_go_live.ps1 --api-only
+python examples/integrator_api.py
+```
+
+OpenAPI: [`docs/integrator_openapi.yaml`](docs/integrator_openapi.yaml). Operator guide:
+[`docs/integrator_go_live.md`](docs/integrator_go_live.md). CEX reply kit:
+[`scripts/cex_outreach/reply_kit.md`](scripts/cex_outreach/reply_kit.md). Pilot keys live in
+gitignored `kaspa.env`; handoff copy at `.local/integrator_pilot_credentials.txt`.
+
 Withdrawal expectations and the first exact destination-output observation are also stored
 under SQLite WAL with `synchronous=FULL`. A restart can therefore confirm an accepted
 withdrawal from its durable block DAA even after the recipient spends the output. Conflicting
@@ -251,7 +270,7 @@ From kaspa.org’s integrator call, the Toccata guide, and kascov (not Discord �
 | KRC-20 commit/reveal vs `tn10api.kasplex.org` | Kasplex | `tn10-kasplex` + `examples/kasplex_krc20.py`. Frontier tick **TMBMN** is live (mint+transfer). Not USD. `--deploy` of a crate-owned tick burns **1000 tKAS**. |
 | DAGKnight / 100 BPS lore | Narrative only | KIP-2 Proposed. Live is GHOSTDAG @ 10 BPS. Fake telemetry does not activate it. Refused. |
 | Archival / indexer cost | Exchanges / ops | Need `getUtxosByAddresses` + DAA depth, not a simulated worker. `cex::snapshot_address` + `tn10-deposits` / `tn10-withdraw`. |
-| CEX integration rehearsal | Integrator call / `Kaspa to do.pdf` | Partial: bounded multi-address snapshots/ingestion, durable exact withdrawals, scheduled/dead-letter idempotency-key webhook outbox, atomic deduplicating receiver inbox, delta-driven durable wRPC replay, ordered owned-node failover, N-of-M supervisor health, loopback mTLS on the webhook receiver, and mTLS required to deliver off-loopback. Node 2 is reached via loopback tunnel (`127.0.0.1:28210`). Do not bind 18210/18320 publicly. |
+| CEX integration rehearsal | Integrator call / `Kaspa to do.pdf` | `tn10-integrator-api`: auth, gate, deposits/outbox/withdraw reads, return-address, evidence, watchlist, signed webhook test. Plus bounded multi-address snapshots/ingestion, durable exact withdrawals, scheduled/dead-letter idempotency-key webhook outbox, atomic deduplicating receiver inbox, delta-driven durable wRPC replay, ordered owned-node failover, N-of-M supervisor health, loopback mTLS on the webhook receiver, and mTLS required to deliver off-loopback. Node 2 via loopback tunnel (`127.0.0.1:28210`). Do not bind 18210/18320 publicly. |
 
 Do **not** open unofficial consensus PRs against rusty-kaspa. Acceptable PRs there follow their review process and KIPs.
 

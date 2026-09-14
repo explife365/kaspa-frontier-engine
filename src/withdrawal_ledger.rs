@@ -40,6 +40,22 @@ impl WithdrawalState {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WithdrawalRecordView {
+    pub tx_id: String,
+    pub output_index: u32,
+    pub dest: String,
+    pub amount_sompi: u64,
+    pub required_confirmations: u64,
+    pub state: String,
+    pub observed_block_daa: Option<u64>,
+    pub last_checked_daa: u64,
+    pub confirmed_daa: Option<u64>,
+    pub rejected_daa: Option<u64>,
+    pub rejection_reason: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WithdrawalRecord {
     pub expected: WithdrawalExpectation,
@@ -284,6 +300,102 @@ impl WithdrawalLedger {
     pub fn get(&self, expected: &WithdrawalExpectation) -> Result<Option<WithdrawalRecord>> {
         load_record(&self.connection, &expected.tx_id, expected.output_index)
     }
+
+    pub fn list_withdrawals(
+        &self,
+        state: Option<&str>,
+        limit: u64,
+        offset: u64,
+    ) -> Result<Vec<WithdrawalRecordView>> {
+        let limit = limit.clamp(1, 500);
+        let offset = offset.min(1_000_000);
+        const SELECT: &str = "SELECT tx_id, output_index, dest, amount_sompi, required_confirmations, state,
+                        observed_block_daa, last_checked_daa, confirmed_daa, rejected_daa, rejection_reason
+                 FROM withdrawals";
+        let mut statement = if state.is_some() {
+            self.connection.prepare(
+                &format!("{SELECT} WHERE state=?1 ORDER BY last_checked_daa DESC, tx_id, output_index LIMIT ?2 OFFSET ?3"),
+            )?
+        } else {
+            self.connection.prepare(
+                &format!("{SELECT} ORDER BY last_checked_daa DESC, tx_id, output_index LIMIT ?1 OFFSET ?2"),
+            )?
+        };
+        let rows = if let Some(st) = state {
+            statement.query_map(params![st, limit, offset], map_withdrawal_view)?
+        } else {
+            statement.query_map(params![limit, offset], map_withdrawal_view)?
+        };
+        let mut records = Vec::new();
+        for row in rows {
+            records.push(row?);
+        }
+        Ok(records)
+    }
+
+    pub fn get_view(&self, tx_id: &str, output_index: u32) -> Result<Option<WithdrawalRecordView>> {
+        self.connection
+            .query_row(
+                "SELECT tx_id, output_index, dest, amount_sompi, required_confirmations, state,
+                        observed_block_daa, last_checked_daa, confirmed_daa, rejected_daa, rejection_reason
+                 FROM withdrawals WHERE tx_id=?1 AND output_index=?2",
+                params![tx_id, i64::from(output_index)],
+                map_withdrawal_view,
+            )
+            .optional()
+            .map_err(EngineError::from)
+    }
+}
+
+fn map_withdrawal_view(row: &rusqlite::Row<'_>) -> rusqlite::Result<WithdrawalRecordView> {
+    decode_withdrawal_view(row).map_err(|err| {
+        rusqlite::Error::InvalidParameterName(err.to_string())
+    })
+}
+
+fn decode_withdrawal_view(row: &rusqlite::Row<'_>) -> Result<WithdrawalRecordView> {
+    let output_index = row.get::<_, i64>(1)?;
+    let amount = row.get::<_, i64>(3)?;
+    let required = row.get::<_, i64>(4)?;
+    let observed = row.get::<_, Option<i64>>(6)?;
+    let last_checked = row.get::<_, i64>(7)?;
+    let confirmed = row.get::<_, Option<i64>>(8)?;
+    let rejected = row.get::<_, Option<i64>>(9)?;
+    Ok(WithdrawalRecordView {
+        tx_id: row.get(0)?,
+        output_index: u32::try_from(output_index)
+            .map_err(|_| EngineError::Message("invalid SQLite output index".into()))?,
+        dest: row.get(2)?,
+        amount_sompi: u64::try_from(amount)
+            .map_err(|_| EngineError::Message("invalid SQLite amount".into()))?,
+        required_confirmations: u64::try_from(required)
+            .map_err(|_| EngineError::Message("invalid SQLite confirmations".into()))?,
+        state: row.get(5)?,
+        observed_block_daa: observed
+            .map(|value| {
+                u64::try_from(value).map_err(|_| {
+                    EngineError::Message("invalid SQLite observed_block_daa".into())
+                })
+            })
+            .transpose()?,
+        last_checked_daa: u64::try_from(last_checked)
+            .map_err(|_| EngineError::Message("invalid SQLite last_checked_daa".into()))?,
+        confirmed_daa: confirmed
+            .map(|value| {
+                u64::try_from(value).map_err(|_| {
+                    EngineError::Message("invalid SQLite confirmed_daa".into())
+                })
+            })
+            .transpose()?,
+        rejected_daa: rejected
+            .map(|value| {
+                u64::try_from(value).map_err(|_| {
+                    EngineError::Message("invalid SQLite rejected_daa".into())
+                })
+            })
+            .transpose()?,
+        rejection_reason: row.get(10)?,
+    })
 }
 
 fn update_last_checked(
@@ -496,6 +608,22 @@ mod tests {
         conflict.block_daa_score += 1;
         ledger.observe(&expected(), 1_001, &conflict).unwrap();
         assert!(ledger.observe(&expected(), 1_002, &observed()).is_err());
+    }
+
+    #[test]
+    fn list_withdrawals_filters_by_state() {
+        let mut ledger = WithdrawalLedger::open(":memory:").unwrap();
+        ledger.register(&expected(), 60).unwrap();
+        ledger.observe(&expected(), 1_000, &observed()).unwrap();
+        let all = ledger.list_withdrawals(None, 100, 0).unwrap();
+        assert_eq!(all.len(), 1);
+        let observed_only = ledger
+            .list_withdrawals(Some("observed"), 100, 0)
+            .unwrap();
+        assert_eq!(observed_only.len(), 1);
+        assert_eq!(ledger.get_view(&expected().tx_id, 1).unwrap().unwrap().state, "observed");
+        let pending_only = ledger.list_withdrawals(Some("pending"), 100, 0).unwrap();
+        assert_eq!(pending_only.len(), 0);
     }
 
     #[test]

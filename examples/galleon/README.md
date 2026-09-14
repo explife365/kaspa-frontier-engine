@@ -53,7 +53,7 @@ forge test --match-contract GalleonFeePoolTest
 forge test --match-contract HtlcBridgeFactoryTest
 python examples/galleon_fee_pool_deploy.py --simulate
 python examples/galleon_bridge_factory_deploy.py --simulate
-python examples/integrator_api.py --port 8787
+python examples/integrator_api.py --port 8788
 ```
 
 ### Galleon DEX (gTEST / wiKAS)

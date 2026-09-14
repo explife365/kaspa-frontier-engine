@@ -27,6 +27,23 @@ pub struct LedgerEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct DepositRecord {
+    pub tx_id: String,
+    pub output_index: u32,
+    pub address: String,
+    pub amount_sompi: u64,
+    pub block_daa_score: u64,
+    pub is_coinbase: bool,
+    pub state: String,
+    pub first_seen_daa: u64,
+    pub last_seen_daa: u64,
+    pub credited_daa: Option<u64>,
+    pub reversed_daa: Option<u64>,
+    pub reversal_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OutboxEventStatus {
     #[serde(flatten)]
     pub event: LedgerEvent,
@@ -416,6 +433,60 @@ impl DepositLedger {
         )?;
         tx.commit()?;
         Ok(())
+    }
+
+    pub fn list_deposits(
+        &self,
+        address: Option<&str>,
+        state: Option<&str>,
+        limit: u64,
+        offset: u64,
+    ) -> Result<Vec<DepositRecord>> {
+        let limit = limit.clamp(1, 500);
+        let offset = offset.min(1_000_000);
+        const SELECT: &str = "SELECT tx_id, output_index, address, amount_sompi, block_daa_score, is_coinbase,
+                    state, first_seen_daa, last_seen_daa, credited_daa, reversed_daa, reversal_reason
+             FROM deposits";
+        let mut statement = match (address, state) {
+            (Some(_addr), Some(_st)) => self.conn.prepare(
+                &format!("{SELECT} WHERE address=?1 AND state=?2 ORDER BY last_seen_daa DESC, tx_id, output_index LIMIT ?3 OFFSET ?4"),
+            )?,
+            (Some(_addr), None) => self.conn.prepare(
+                &format!("{SELECT} WHERE address=?1 ORDER BY last_seen_daa DESC, tx_id, output_index LIMIT ?2 OFFSET ?3"),
+            )?,
+            (None, Some(_st)) => self.conn.prepare(
+                &format!("{SELECT} WHERE state=?1 ORDER BY last_seen_daa DESC, tx_id, output_index LIMIT ?2 OFFSET ?3"),
+            )?,
+            (None, None) => self.conn.prepare(
+                &format!("{SELECT} ORDER BY last_seen_daa DESC, tx_id, output_index LIMIT ?1 OFFSET ?2"),
+            )?,
+        };
+        let rows = match (address, state) {
+            (Some(addr), Some(st)) => {
+                statement.query_map(params![addr, st, limit, offset], map_deposit_row)?
+            }
+            (Some(addr), None) => statement.query_map(params![addr, limit, offset], map_deposit_row)?,
+            (None, Some(st)) => statement.query_map(params![st, limit, offset], map_deposit_row)?,
+            (None, None) => statement.query_map(params![limit, offset], map_deposit_row)?,
+        };
+        let mut records = Vec::new();
+        for row in rows {
+            records.push(row?);
+        }
+        Ok(records)
+    }
+
+    pub fn get_deposit(&self, tx_id: &str, output_index: u32) -> Result<Option<DepositRecord>> {
+        self.conn
+            .query_row(
+                "SELECT tx_id, output_index, address, amount_sompi, block_daa_score, is_coinbase,
+                        state, first_seen_daa, last_seen_daa, credited_daa, reversed_daa, reversal_reason
+                 FROM deposits WHERE tx_id=?1 AND output_index=?2",
+                params![tx_id, i64::from(output_index)],
+                map_deposit_row,
+            )
+            .optional()
+            .map_err(EngineError::from)
     }
 
     pub fn pending_count(&self) -> Result<usize> {
@@ -809,6 +880,53 @@ impl DepositLedger {
         }
         Ok(())
     }
+}
+
+fn map_deposit_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DepositRecord> {
+    decode_deposit_row(row).map_err(|err| {
+        rusqlite::Error::InvalidParameterName(err.to_string())
+    })
+}
+
+fn decode_deposit_row(row: &rusqlite::Row<'_>) -> Result<DepositRecord> {
+    let output_index = row.get::<_, i64>(1)?;
+    let amount = row.get::<_, i64>(3)?;
+    let block_daa = row.get::<_, i64>(4)?;
+    let first_seen = row.get::<_, i64>(7)?;
+    let last_seen = row.get::<_, i64>(8)?;
+    let credited = row.get::<_, Option<i64>>(9)?;
+    let reversed = row.get::<_, Option<i64>>(10)?;
+    Ok(DepositRecord {
+        tx_id: row.get(0)?,
+        output_index: u32::try_from(output_index)
+            .map_err(|_| EngineError::Message("invalid SQLite output index".into()))?,
+        address: row.get(2)?,
+        amount_sompi: u64::try_from(amount)
+            .map_err(|_| EngineError::Message("invalid SQLite amount".into()))?,
+        block_daa_score: u64::try_from(block_daa)
+            .map_err(|_| EngineError::Message("invalid SQLite block DAA".into()))?,
+        is_coinbase: row.get::<_, i64>(5)? != 0,
+        state: row.get(6)?,
+        first_seen_daa: u64::try_from(first_seen)
+            .map_err(|_| EngineError::Message("invalid SQLite first_seen_daa".into()))?,
+        last_seen_daa: u64::try_from(last_seen)
+            .map_err(|_| EngineError::Message("invalid SQLite last_seen_daa".into()))?,
+        credited_daa: credited
+            .map(|value| {
+                u64::try_from(value).map_err(|_| {
+                    EngineError::Message("invalid SQLite credited_daa".into())
+                })
+            })
+            .transpose()?,
+        reversed_daa: reversed
+            .map(|value| {
+                u64::try_from(value).map_err(|_| {
+                    EngineError::Message("invalid SQLite reversed_daa".into())
+                })
+            })
+            .transpose()?,
+        reversal_reason: row.get(11)?,
+    })
 }
 
 fn decode_event(
@@ -1241,6 +1359,40 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].kind, "credit");
         assert_eq!(events[1].kind, "reverse");
+    }
+
+    #[test]
+    fn list_deposits_filters_by_address_and_state() {
+        let mut ledger = DepositLedger::open(":memory:").unwrap();
+        let mut appearance = observed(160);
+        appearance.address = ADDRESS.into();
+        let mut first_confirmed = confirmed();
+        first_confirmed.address = ADDRESS.into();
+        ledger
+            .reconcile(160, &[appearance], &[first_confirmed], &[])
+            .unwrap();
+        let mut appearance2 = observed(161);
+        appearance2.tx_id = "tx2".into();
+        appearance2.address = ADDRESS_2.into();
+        let mut confirmed2 = confirmed();
+        confirmed2.tx_id = "tx2".into();
+        confirmed2.address = ADDRESS_2.into();
+        ledger
+            .reconcile(161, &[appearance2], &[confirmed2], &[])
+            .unwrap();
+        let all = ledger.list_deposits(None, None, 100, 0).unwrap();
+        assert_eq!(all.len(), 2);
+        let by_addr = ledger
+            .list_deposits(Some(ADDRESS), None, 100, 0)
+            .unwrap();
+        assert_eq!(by_addr.len(), 1);
+        assert_eq!(by_addr[0].tx_id, "tx");
+        let by_state = ledger
+            .list_deposits(None, Some("credited"), 100, 0)
+            .unwrap();
+        assert_eq!(by_state.len(), 2);
+        let one = ledger.get_deposit("tx", 0).unwrap().unwrap();
+        assert_eq!(one.address, ADDRESS);
     }
 
     #[test]

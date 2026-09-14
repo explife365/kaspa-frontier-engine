@@ -3,6 +3,7 @@
 .env
 .env.local
 kaspa.env
+kaspa.env.lock
 .idea
 .vscode
 .cursor/

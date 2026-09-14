@@ -64,6 +64,27 @@ Until native `getUtxosByCovenantId` on kaspad: use `tn10-covenant-rpc` sidecar o
 - Patch kaspad for Move/Utreexo/DAGKnight lore.
 - Auto-acknowledge outbox events without operator or remote 2xx + idempotency store.
 
+## 7. Integrator HTTP API (CEX-facing)
+
+Production custody API: `tn10-integrator-api` (not the Python `examples/integrator_api.py` demo).
+
+```powershell
+# Set INTEGRATOR_API_KEYS in kaspa.env before any external exposure
+powershell -File scripts/integrator_go_live.ps1 --check
+powershell -File scripts/integrator_go_live.ps1 --api-only
+```
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /v1/gate` | N-of-M health; 503 when red |
+| `GET /v1/deposits` | Deposit journal |
+| `GET /v1/outbox` | Credit/reverse events |
+| `POST /v1/outbox/deliver` | Push to exchange webhook |
+| `GET /v1/withdrawals` | Withdrawal state machine |
+| `POST /v1/watchlist` | Register deposit addresses |
+
+Full spec: `docs/integrator_openapi.yaml`. Operator guide: `docs/integrator_go_live.md`.
+
 ## Rehearsal entrypoint
 
 ```powershell

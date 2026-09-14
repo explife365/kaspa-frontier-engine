@@ -1,7 +1,12 @@
-"""Hosted integrator status API (stdlib HTTP rehearsal).
+"""Legacy integrator status API (stdlib HTTP rehearsal).
 
+Production custody API (auth, deposits, outbox, withdrawals):
+  cargo run --release --bin tn10-integrator-api
+  powershell -File scripts/integrator_go_live.ps1
+
+This Python server remains for dashboard/demo status only:
   python examples/integrator_api.py
-  python examples/integrator_api.py --port 8787
+  python examples/integrator_api.py --port 8788
 
 Endpoints:
   GET /health
@@ -249,11 +254,11 @@ def main() -> int:
     load_kaspa_env(ROOT)
     parser = argparse.ArgumentParser(description="Integrator status HTTP API")
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8787)
+    parser.add_argument("--port", type=int, default=8788)
     args = parser.parse_args()
     httpd = ThreadingHTTPServer((args.host, args.port), IntegratorHandler)
     print(f"integrator-api listening http://{args.host}:{args.port}")
-    print("rehearsal only — not consensus, no auth")
+    print("demo/status only — for CEX custody use: cargo run --release --bin tn10-integrator-api")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

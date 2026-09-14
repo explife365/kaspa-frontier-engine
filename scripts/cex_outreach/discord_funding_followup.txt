@@ -1,0 +1,12 @@
+Follow-up reply template (paste in Discord funding thread when someone asks for detail):
+
+---
+
+Evidence pack artifacts (Sep 14 2026):
+- Gist: https://gist.github.com/explife365/477afea386ddba43574c7cb841ad4c73
+- Repo: https://github.com/explife365/kaspa-frontier-engine
+- Reproduce: `powershell -File scripts/integrator_evidence_pack.ps1`
+
+Exit codes in latest JSON: ownedNodeGate=0, wrpcLive=0, wrpcResnapshot=0 (sdkGate=1 until computeBudget wheel ships — known).
+
+Milestones in the ask map 1:1 to deliverables. Happy to scope mainnet hardening SOW if the vote passes.

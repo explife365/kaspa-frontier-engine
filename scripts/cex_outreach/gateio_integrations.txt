@@ -1,0 +1,26 @@
+To: listing@gate.io
+Subject: Open-source Kaspa TN10 integrator stack — pilot for KAS deposit/withdraw rehearsal
+
+Hello Gate.io integrations,
+
+Quick intro: we maintain kaspa-frontier-engine, a TN10 integrator rehearsal for exchange-grade Kaspa deposit detection, withdrawal observation, and owned-node health gating.
+
+What is live (Sep 14 2026 evidence):
+- 2/2 owned kaspad nodes, N-of-M gate green
+- wRPC live subscribe + REST resnapshot deposit journal
+- SQLite ledger idempotent across restarts; webhook outbox
+- Production-oriented runbook: cex_production_runbook.md
+
+Public REST alone cannot safely credit deposits; this stack fail-closes when nodes lag or desync.
+
+Links:
+- Repo: https://github.com/explife365/kaspa-frontier-engine
+- Evidence: https://gist.github.com/explife365/477afea386ddba43574c7cb841ad4c73
+
+Proposal: paid 3-week TN10 pilot (KAS or USD), then mainnet cutover doc with your nodes. We do not hold mainnet custody.
+
+Interested in a short call or async review of the evidence JSON?
+
+Thanks,
+explife365
+explife365@gmail.com

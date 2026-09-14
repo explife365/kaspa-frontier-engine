@@ -81,7 +81,7 @@
 
     async function loadPath(id) {
       try {
-        const r = await fetch("http://127.0.0.1:8787/v1/onboard?path=" + id);
+        const r = await fetch("http://127.0.0.1:8788/v1/onboard?path=" + id);
         const j = await r.json();
         renderPath(id, j);
         statusEl.textContent = "Live from integrator API.";

@@ -25,7 +25,7 @@ Each row has a swap_when field — when rusty-kaspa issue eleven-twenty-eight or
 
 [1:45 DEMO 4 — integrator API + dashboard]
 "Start the status API:
-  python examples/integrator_api.py --port 8787
+  python examples/integrator_api.py --port 8788
 Open examples/kaspa_frontier_dashboard.html — live shim status, DAG visuals, inclusion comparison."
 
 [2:05 FULL NODE — optional clip]

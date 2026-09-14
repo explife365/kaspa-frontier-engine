@@ -1,0 +1,173 @@
+openapi: 3.0.3
+info:
+  title: Kaspa TN10 Integrator API
+  version: 1.0.0
+  description: |
+    CEX custody rehearsal on Kaspa testnet-10. Not consensus.
+    Fail-closed when owned-node gate is red (`INTEGRATOR_REQUIRE_GATE=1`).
+servers:
+  - url: http://127.0.0.1:8787
+    description: Loopback rehearsal (production must use mTLS reverse proxy)
+security:
+  - integratorKey: []
+paths:
+  /health:
+    get:
+      summary: Liveness
+      security: []
+      responses:
+        "200":
+          description: Service up
+  /openapi.json:
+    get:
+      summary: OpenAPI document (JSON)
+      security: []
+  /v1/gate:
+    get:
+      summary: Owned-node N-of-M gate
+      responses:
+        "200":
+          description: Gate green
+        "503":
+          description: Gate red
+  /v1/deposits:
+    get:
+      summary: List deposits
+      parameters:
+        - name: address
+          in: query
+          schema: { type: string }
+        - name: state
+          in: query
+          schema: { type: string, enum: [pending, credited, reversed] }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 100, maximum: 500 }
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0 }
+      responses:
+        "200":
+          description: Deposit journal page
+        "503":
+          description: Gate red
+  /v1/deposits/{txid}/{vout}:
+    get:
+      summary: Get deposit by outpoint
+      parameters:
+        - name: txid
+          in: path
+          required: true
+          schema: { type: string }
+        - name: vout
+          in: path
+          required: true
+          schema: { type: integer }
+  /v1/outbox:
+    get:
+      summary: List outbox credit/reverse events
+      parameters:
+        - name: dead_only
+          in: query
+          schema: { type: boolean }
+  /v1/outbox/{id}/ack:
+    post:
+      summary: Acknowledge delivered outbox event
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+  /v1/outbox/deliver:
+    post:
+      summary: Deliver pending outbox events to webhook URL
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, format: uri }
+                limit: { type: integer, minimum: 1, maximum: 100, default: 10 }
+  /v1/withdrawals:
+    get:
+      summary: List withdrawals
+      parameters:
+        - name: state
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer }
+        - name: offset
+          in: query
+          schema: { type: integer }
+  /v1/withdrawals/{txid}/{vout}:
+    get:
+      summary: Get withdrawal by outpoint
+  /v1/return-address/{txid}:
+    get:
+      summary: Resolve deposit sender return address (rusty-kaspa #435 shim)
+      parameters:
+        - name: vout
+          in: query
+          schema: { type: integer, default: 0 }
+  /v1/fee-estimate/{txid}:
+    get:
+      summary: TX fee estimate from Toccata (#615 partial)
+  /v1/evidence/latest:
+    get:
+      summary: Latest integrator evidence JSON pack
+  /v1/watchlist:
+    get:
+      summary: Watched TN10 deposit addresses
+    post:
+      summary: Register 1–100 TN10 deposit addresses for ingest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [addresses]
+              properties:
+                addresses:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items: { type: string }
+  /v1/webhooks/test:
+    post:
+      summary: Send signed test webhook payload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, format: uri }
+components:
+  securitySchemes:
+    integratorKey:
+      type: apiKey
+      in: header
+      name: X-Integrator-Key
+  schemas:
+    WebhookEvent:
+      type: object
+      properties:
+        schemaVersion: { type: integer }
+        event:
+          type: object
+          properties:
+            id: { type: integer }
+            eventKey: { type: string }
+            kind: { type: string, enum: [credit, reverse] }
+            txId: { type: string }
+            outputIndex: { type: integer }
+            amountSompi: { type: integer }
+            address: { type: string }

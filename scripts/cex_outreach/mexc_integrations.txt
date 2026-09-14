@@ -1,0 +1,30 @@
+To: listing@mexc.com
+Subject: TN10 Kaspa deposit/withdraw integrator pilot — evidence pack available
+
+Hello MEXC integrations team,
+
+I'm reaching out with a focused offer for Kaspa (KAS) custody rehearsal on testnet-10 — not a listing request.
+
+We operate kaspa-frontier-engine, an open-source TN10 integrator stack with:
+- Owned-node N-of-M health gate (2/2 synced kaspad with --utxoindex)
+- wRPC subscribe + REST resnapshot deposit journal (SQLite, idempotent on restart)
+- DAA-depth deposit confirmation and exact withdrawal UTXO observation
+- Durable webhook outbox with fail-closed behavior when the gate is red
+- Return-address resolver for deposits (rusty-kaspa#435 integrator path until native RPC ships)
+
+Evidence (Sep 14 2026): 2/2 adoption gate green, wRPC live journal passing.
+- Repo: https://github.com/explife365/kaspa-frontier-engine
+- Evidence gist: https://gist.github.com/explife365/477afea386ddba43574c7cb841ad4c73
+- Runbook: scripts/cex_production_runbook.md (in repo)
+
+Paid 3-week pilot (KAS or USD SOW — not a grant):
+Week 1 — Your TN10 deposit addresses on our rehearsal stack; evidence JSON + journal export.
+Week 2 — Withdrawal flow mapping + webhook dry-run to your staging endpoint.
+Week 3 — Mainnet cutover checklist (your nodes, your keys; we do not hold mainnet custody).
+
+Happy to schedule a 30-minute technical walkthrough or send the evidence pack JSON directly.
+
+Best regards,
+explife365
+explife365@gmail.com
+https://github.com/explife365/kaspa-frontier-engine

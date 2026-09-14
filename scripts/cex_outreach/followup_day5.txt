@@ -1,0 +1,11 @@
+Subject: Re: Kaspa TN10 integrator pilot
+
+Hi — following up on my note from last week about our TN10 integrator rehearsal (owned-node deposit journal, N-of-M gate, evidence pack).
+
+Quick links:
+- Repo: https://github.com/explife365/kaspa-frontier-engine
+- Evidence: https://gist.github.com/explife365/477afea386ddba43574c7cb841ad4c73
+
+Still offering a 3-week paid TN10 pilot if Kaspa ops is reviewing deposit/withdraw tooling. Happy to send the evidence JSON or do a 30-minute walkthrough.
+
+explife365@gmail.com

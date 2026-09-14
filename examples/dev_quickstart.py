@@ -57,8 +57,8 @@ PATHS: dict[str, dict[str, Any]] = {
             "python examples/galleon_pool.py --status",
             "python examples/galleon_dex.py status",
             "python examples/galleon_dex.py quote --sell 1.0 --buy wiKAS",
-            "python examples/integrator_api.py --port 8787",
-            "curl http://127.0.0.1:8787/v1/cex/validate",
+            "python examples/integrator_api.py --port 8788",
+            "curl http://127.0.0.1:8788/v1/cex/validate",
         ],
         "media": {
             "text": "examples/galleon/README.md",

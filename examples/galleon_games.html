@@ -30,7 +30,7 @@
 <body>
   <header>
     <h1>Galleon DeFi Games</h1>
-    <p class="sub">Live stats from integrator API. Swaps and plays use the Python CLI (wallet in kaspa.env). Run <code>python examples/integrator_api.py</code> first.</p>
+    <p class="sub">Live stats from demo integrator API (:8788). CEX custody API is <code>tn10-integrator-api</code> on :8787. Run <code>python examples/integrator_api.py</code> first.</p>
   </header>
   <main>
     <div class="card" id="stats">Loading…</div>
@@ -47,7 +47,7 @@
     <div id="err"></div>
   </main>
   <script>
-    const API = "http://127.0.0.1:8787";
+    const API = "http://127.0.0.1:8788";
     const statsEl = document.getElementById("stats");
     const cmdsEl = document.getElementById("cmds");
     const errEl = document.getElementById("err");

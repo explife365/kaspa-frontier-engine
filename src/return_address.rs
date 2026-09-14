@@ -10,7 +10,8 @@ use crate::rest::{Tn10RestClient, ToccataTx, ToccataTxInput};
 
 const MAX_CHAIN_WALK: usize = 8;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ReturnAddressReport {
     pub deposit_tx_id: String,
     pub deposit_output_index: u32,
@@ -19,7 +20,8 @@ pub struct ReturnAddressReport {
     pub hops: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TxFeeReport {
     pub transaction_id: String,
     pub fee_sompi: Option<u64>,

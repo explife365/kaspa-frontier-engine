@@ -1,0 +1,25 @@
+To: listing@bybit.com
+Subject: Kaspa (KAS) TN10 integrator pilot — owned-node deposit journal + health gate
+
+Hello Bybit integrations team,
+
+We have an open-source Kaspa testnet-10 integrator rehearsal that may be useful if you're expanding KAS deposit/withdraw robustness or evaluating integrator vendors.
+
+Stack highlights:
+- Owned kaspad --utxoindex, 2/2 node N-of-M health gate (green Sep 14 2026)
+- wRPC + REST deposit journal with reorg-safe semantics
+- Withdrawal UTXO observation at DAA depth
+- Durable webhook outbox; mTLS for non-loopback delivery
+- Aligns with Kaspa integrator guide; not a consensus change
+
+Evidence + code:
+https://github.com/explife365/kaspa-frontier-engine
+https://gist.github.com/explife365/477afea386ddba43574c7cb841ad4c73
+
+Offer: 3-week paid TN10 pilot (KAS/USD SOW) — your addresses on our rehearsal environment, journal export, staging webhook test, mainnet cutover checklist (your keys).
+
+Open to a 30-minute technical review if helpful.
+
+Best,
+explife365
+explife365@gmail.com

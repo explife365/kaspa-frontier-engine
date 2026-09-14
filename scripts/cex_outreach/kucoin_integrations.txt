@@ -1,0 +1,28 @@
+To: listing@kucoin.com
+Subject: Kaspa TN10 integrator rehearsal — deposit journal + N-of-M gate for KAS ops
+
+Hello KuCoin technical integrations,
+
+We built an open-source Kaspa testnet-10 integrator rehearsal aimed at exchange deposit/withdraw operations — complementary to public REST, not a replacement for owned kaspad nodes.
+
+Live capabilities:
+- Multi-address UTXO ingestion (REST + owned wRPC)
+- N-of-M owned-node gate (2/2 healthy on TN10 as of Sep 14 2026)
+- Durable deposit journal, withdrawal observation, webhook outbox
+- Fail-closed credit when health gate is red
+- Return-address + fee-enrichment shims for rusty-kaspa#435 / #615 (upstream PR #906)
+
+Artifacts:
+- https://github.com/explife365/kaspa-frontier-engine
+- https://gist.github.com/explife365/477afea386ddba43574c7cb841ad4c73
+
+We offer a paid TN10 pilot (3 weeks, KAS or USD SOW):
+1) Run your deposit addresses; deliver journal + evidence JSON.
+2) Map withdrawals; webhook dry-run to staging.
+3) Mainnet cutover checklist — your infrastructure, your keys.
+
+If Kaspa ops is evaluating reorg-safe deposit detection or integrator tooling, I can share the evidence pack and a 30-minute walkthrough.
+
+Regards,
+explife365
+explife365@gmail.com

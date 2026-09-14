@@ -26,7 +26,7 @@ When rusty-kaspa#1128 or kaspa-python-sdk#78 lands, the same `integrator_shims.p
 
 ```bash
 python examples/integrator_status.py --skip-gate
-python examples/integrator_api.py --port 8787
+python examples/integrator_api.py --port 8788
 # browser: examples/kaspa_frontier_dashboard.html
 ```
 

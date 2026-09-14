@@ -1,0 +1,17 @@
+Short pitch for Bybit (LinkedIn / help form — not listing@bybit.com):
+
+---
+
+Subject: Kaspa TN10 integrator pilot — deposit journal + N-of-M gate
+
+Hi — we built an open-source Kaspa testnet-10 integrator rehearsal for exchange deposit/withdraw ops (owned kaspad, wRPC journal, fail-closed health gate). Not a listing ask.
+
+Live Sep 14 2026: 2/2 TN10 nodes green, evidence pack passing.
+Repo: https://github.com/explife365/kaspa-frontier-engine
+Evidence: https://gist.github.com/explife365/477afea386ddba43574c7cb841ad4c73
+
+Offering a paid 3-week TN10 pilot (journal export, webhook dry-run, mainnet cutover checklist — your keys).
+
+Happy to share evidence JSON or do a 30-min walkthrough.
+
+explife365@gmail.com
