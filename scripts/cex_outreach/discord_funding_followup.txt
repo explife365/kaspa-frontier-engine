@@ -1,12 +1,22 @@
-Follow-up reply template (paste in Discord funding thread when someone asks for detail):
+Follow-up reply template (paste in Discord funding thread):
 
 ---
 
-Evidence pack artifacts (Sep 14 2026, stack live 2/2):
+**TN10 integrator update (Sep 14 2026)**
+
+Stack live on owned nodes — gate **2/2 green**, custody API on loopback `:8787`, demo dashboard `:8788`.
+
+**Evidence**
 - Gist: https://gist.github.com/explife365/477afea386ddba43574c7cb841ad4c73
 - Repo: https://github.com/explife365/kaspa-frontier-engine
 - Reproduce: `powershell -File scripts/integrator_evidence_pack.ps1`
 
-Exit codes in latest JSON: ownedNodeGate=0, wrpcLive=0, wrpcResnapshot=0 (sdkGate=1 until computeBudget wheel ships — known).
+**What shipped since initial post**
+- `tn10-integrator-api` — auth, deposits, outbox, withdrawals, gate (OpenAPI in repo)
+- Outbox webhook dry-run: **10/10** credit events delivered to local receiver with idempotency keys
+- Galleon jackpot round 0 drawn (testnet): https://explorer.galleon-testnet.igralabs.com/tx/0xd98011836bf1b979f0dcf9491f28b4d92df18aa632f38ea706a66a6c2eb12f25
+- 5-min integrator demo video recorded (attach in thread if useful)
 
-Milestones in the ask map 1:1 to deliverables. Happy to scope mainnet hardening SOW if the vote passes.
+Exit codes in latest evidence JSON: ownedNodeGate=0, wrpcLive=0 (sdkGate=1 until computeBudget wheel publishes — known).
+
+Milestones in the ask map map 1:1 to deliverables. Happy to scope mainnet hardening SOW if the vote passes.

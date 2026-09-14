@@ -23,10 +23,16 @@ Coin flip, dice, jackpot on gTEST. Not USD — rehearsal only."
   python scripts/integrator_shims.py --json
 Each row has a swap_when field — when rusty-kaspa issue eleven-twenty-eight or SDK PR seventy-eight merges, you change one env var, not your app."
 
-[1:45 DEMO 4 — integrator API + dashboard]
-"Start the status API:
+[1:35 DEMO 4 — custody API (CEX path)]
+"Production custody rehearsal:
+  powershell -File scripts/integrator_stack.ps1 --status
+  curl http://127.0.0.1:8787/health
+Auth header X-Integrator-Key on /v1/deposits and /v1/outbox. Gate returns 503 when nodes are red."
+
+[1:45 DEMO 5 — demo dashboard]
+"Status and DEX/games API on a separate port:
   python examples/integrator_api.py --port 8788
-Open examples/kaspa_frontier_dashboard.html — live shim status, DAG visuals, inclusion comparison."
+Open examples/kaspa_frontier_dashboard.html — shim status, DAG visuals, inclusion comparison."
 
 [2:05 FULL NODE — optional clip]
 "If you run owned kaspad:

@@ -28,11 +28,11 @@ Do **not** retry `listing@bybit.com` from the same Gmail account repeatedly (can
 - [x] Production stack running (`scripts/integrator_stack.ps1`) — gate 2/2, custody `:8787`, demo `:8788`
 - [x] Integrator keys generated (`scripts/integrator_gen_keys.py`) — handoff `.local/integrator_pilot_credentials.txt`
 - [x] Watchlist registered on custody API
-- [x] Jackpot auto-draw scheduled (`scripts/galleon_jackpot_draw_when_ready.ps1`, round ends `1789427323`)
-- [ ] Bybit LinkedIn / help form if no bounce receipt in Sent folder (`bybit_linkedin.txt`)
-- [ ] Monitor Discord funding thread; reply with `discord_funding_followup.txt`
-- [ ] Record 5-min integrator demo (`scripts/media/dev_video_script.txt`)
-- [ ] Follow-up bump at day 5–7 (Sep 19–21 2026) if no reply — `followup_day5.txt` + `open_gmail_drafts.ps1`
-- [ ] Outbox webhook deliver when deposit DB not locked: `POST /v1/outbox/deliver` → `http://127.0.0.1:18320/kaspa-events`
+- [x] Jackpot round 0 drawn (tx `0xd9801183…b12f25`, round 1 live, ends `1789447062`)
+- [x] Outbox webhook deliver — 10/10 credit events → `http://127.0.0.1:18320/kaspa-events` (outbox empty)
+- [ ] **Discord** — paste `discord_funding_followup.txt` in funding thread (updated Sep 14 PM)
+- [ ] **Bybit** — LinkedIn / help form (`bybit_linkedin.txt`); do not resend listing@bybit.com
+- [x] **Video** — recorded (Sep 14 2026; script: `scripts/media/dev_video_script.txt`)
+- [ ] **CEX day 5–7** (Sep 19–21) — `open_followup_drafts.ps1` if no reply
 
 Operator checklist: `powershell -File scripts/cex_outreach/run_remaining.ps1`

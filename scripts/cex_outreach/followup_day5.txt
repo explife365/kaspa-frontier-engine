@@ -5,7 +5,10 @@ Hi — following up on my note from last week about our TN10 integrator rehearsa
 Quick links:
 - Repo: https://github.com/explife365/kaspa-frontier-engine
 - Evidence: https://gist.github.com/explife365/477afea386ddba43574c7cb841ad4c73
+- OpenAPI: docs/integrator_openapi.yaml (custody API: deposits, outbox webhooks, gate)
 
-Still offering a 3-week paid TN10 pilot if Kaspa ops is reviewing deposit/withdraw tooling. Happy to send the evidence JSON or do a 30-minute walkthrough.
+Since first note: production `tn10-integrator-api` shipped; 2/2 owned-node gate green; 10/10 outbox credit events delivered to staging webhook with idempotency keys.
+
+Still offering a 3-week paid TN10 pilot if your integrations team wants a walkthrough. Happy to send evidence JSON or do 30 minutes on staging endpoints.
 
 explife365@gmail.com
