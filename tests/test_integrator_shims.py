@@ -13,11 +13,13 @@ from integrator_shims import BLOCKERS, build_report, covenant_utxos_route, owned
 
 
 class IntegratorShimsTests(unittest.TestCase):
-    def test_blocker_registry_has_five_entries(self) -> None:
-        self.assertEqual(len(BLOCKERS), 5)
+    def test_blocker_registry_has_seven_entries(self) -> None:
+        self.assertEqual(len(BLOCKERS), 7)
         ids = {b.id for b in BLOCKERS}
         self.assertIn("covenant_utxo_index", ids)
         self.assertIn("covenant_sdk_broadcast", ids)
+        self.assertIn("return_address_rpc", ids)
+        self.assertIn("tx_input_enrichment", ids)
 
     def test_covenant_route_documents_kascov(self) -> None:
         route = covenant_utxos_route()

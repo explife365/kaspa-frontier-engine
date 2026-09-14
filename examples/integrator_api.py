@@ -161,6 +161,17 @@ class IntegratorHandler(BaseHTTPRequestHandler):
                 self._json(503, {"ok": False, "error": str(err)})
             return
 
+        if path == "/v1/games/status":
+            from galleon_games_common import games_status
+
+            try:
+                body = games_status()
+                body["ok"] = True
+                self._json(200, body)
+            except Exception as err:  # noqa: BLE001
+                self._json(503, {"ok": False, "error": str(err)})
+            return
+
         if path == "/v1/cex/readiness":
             from cex_api_common import cex_readiness
 
@@ -221,6 +232,7 @@ class IntegratorHandler(BaseHTTPRequestHandler):
                     "/v1/dex/quote?sell=1.0&buy=wiKAS",
                     "/v1/dex/swap?sell=0.5&buy=wiKAS&dry_run=1",
                     "/v1/dex/pairs",
+                    "/v1/games/status",
                     "/v1/cex/readiness",
                     "/v1/cex/wallets",
                     "/v1/cex/validate",

@@ -76,3 +76,61 @@ def banner(title: str) -> None:
     load_kaspa_env(ROOT)
     print(f"\n=== {title} ===")
     print(f"chain {GALLEON_CHAIN_ID}  Galleon testnet — not mainnet, not USD")
+
+
+def _sel(sig: str) -> str:
+    from eth_utils import keccak
+
+    return "0x" + keccak(text=sig).hex()[:8]
+
+
+def games_status(rpc: str = GALLEON_RPC) -> dict:
+    """Read-only snapshot for integrator API / games UI."""
+    import time
+
+    load_kaspa_env(ROOT)
+    flip = game_address("GALLEON_COIN_FLIP")
+    dice = game_address("GALLEON_DICE")
+    jackpot = game_address("GALLEON_JACKPOT")
+    gtest_meta = token_meta(rpc, GALLEON_GTEST)
+    owner = address_of(galleon_key())
+    gtest = token_balance(rpc, GALLEON_GTEST, owner) / 10**gtest_meta["decimals"]
+    now = int(time.time())
+    ends = decode_uint256(eth_call(rpc, jackpot, _sel("roundEndsAt()")))
+    return {
+        "chain_id": GALLEON_CHAIN_ID,
+        "wallet": owner,
+        "gtest_balance": gtest,
+        "coin_flip": {
+            "address": flip,
+            "games_played": decode_uint256(eth_call(rpc, flip, _sel("gamesPlayed()"))),
+            "min_bet": 0.1,
+            "max_bet": 50.0,
+        },
+        "dice": {
+            "address": dice,
+            "rolls": decode_uint256(eth_call(rpc, dice, _sel("rolls()"))),
+            "min_bet": 0.1,
+            "max_bet": 50.0,
+        },
+        "jackpot": {
+            "address": jackpot,
+            "round_id": decode_uint256(eth_call(rpc, jackpot, _sel("roundId()"))),
+            "tickets": decode_uint256(eth_call(rpc, jackpot, _sel("ticketCount()"))),
+            "pot_gtest": decode_uint256(eth_call(rpc, jackpot, _sel("pot()"))) / 1e18,
+            "ticket_price_gtest": decode_uint256(eth_call(rpc, jackpot, _sel("ticketPrice()"))) / 1e18,
+            "round_ends_at": ends,
+            "seconds_until_draw": max(0, ends - now),
+            "draw_ready": now >= ends,
+        },
+        "cli": {
+            "coin_flip": "python examples/galleon_games.py coin-flip --heads --bet 0.1 --broadcast",
+            "dice": "python examples/galleon_games.py dice --guess 3 --bet 0.1 --broadcast",
+            "jackpot_buy": "python examples/galleon_jackpot.py --buy-ticket --broadcast",
+            "jackpot_draw": "python examples/galleon_jackpot.py --draw --broadcast",
+        },
+        "notes": [
+            "Fund each game contract with gTEST bankroll before play (wins revert if empty).",
+            "gTEST is not USD. Demo randomness only.",
+        ],
+    }

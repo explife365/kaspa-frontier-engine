@@ -63,15 +63,38 @@ try {
         Add-Content -Path $outFile -Value "ibd json parse failed: $_"
     }
 
-    Write-Section "dual wrpc resnapshot (test address)"
-    $wrpcArgs = @(
+    $wrpcDb = Join-Path $outDir "wrpc_$stamp.sqlite"
+    $watchAddr = "kaspatest:qptv6u8kel95drh2p2z492cyksk8lpetep286fngqu5j9nk57g642lzf748kt"
+
+    Write-Section "dual wrpc resnapshot (2/2 gate + REST snapshot)"
+    $wrpcResnapshotArgs = @(
         "run", "--quiet", "--release", "--bin", "tn10-wrpc-live", "--",
-        "kaspatest:qptv6u8kel95drh2p2z492cyksk8lpetep286fngqu5j9nk57g642lzf748kt",
-        "--dual",
+        $watchAddr,
+        "--dual", "--min-healthy", "2",
+        "--database", $wrpcDb,
         "--resnapshot-only"
     )
-    & cargo @wrpcArgs 2>&1 | Tee-Object -FilePath $outFile -Append
-    Add-Content -Path $outFile -Value "tn10-wrpc-live resnapshot exit code: $LASTEXITCODE"
+    & cargo @wrpcResnapshotArgs 2>&1 | Tee-Object -FilePath $outFile -Append
+    $wrpcResnapshotExit = $LASTEXITCODE
+    Add-Content -Path $outFile -Value "tn10-wrpc-live resnapshot exit code: $wrpcResnapshotExit"
+
+    Write-Section "dual wrpc live subscribe (bounded 20s, deposit journal)"
+    $wrpcLiveArgs = @(
+        "run", "--quiet", "--release", "--bin", "tn10-wrpc-live", "--",
+        $watchAddr,
+        "--dual", "--min-healthy", "2",
+        "--database", $wrpcDb,
+        "--max-live-seconds", "20"
+    )
+    & cargo @wrpcLiveArgs 2>&1 | Tee-Object -FilePath $outFile -Append
+    $wrpcLiveExit = $LASTEXITCODE
+    Add-Content -Path $outFile -Value "tn10-wrpc-live live exit code: $wrpcLiveExit"
+
+    Write-Section "deposit outbox (journal rows)"
+    $outboxText = & cargo run --quiet --release --bin tn10-outbox -- list --database $wrpcDb 2>&1 | Out-String
+    $outboxText | Add-Content -Path $outFile
+    $outboxExit = $LASTEXITCODE
+    Add-Content -Path $outFile -Value "tn10-outbox list exit code: $outboxExit"
 
     Write-Section "L1 covenant proof offline (all fixtures)"
     $proofFixtures = @(
@@ -158,15 +181,26 @@ try {
         covenantProofOffline = $proofOfflineJson
         covenantProofKascovOnly = $proofKascovJson
         covenantRpcSmoke = $rpcSmokeJson
+        wrpcDatabase = $wrpcDb
+        wrpcWatchAddress = $watchAddr
         exitCodes = [ordered]@{
             sdkGate = $sdkGateExit
             ibdWatch = $ibdExit
             ownedNodeGate = $healthExit
+            wrpcResnapshot = $wrpcResnapshotExit
+            wrpcLive = $wrpcLiveExit
+            depositOutbox = $outboxExit
             covenantProofOffline = $proofOfflineExit
             covenantProofKascovOnly = $proofKascovExit
             covenantProofLive = $proofExit
             covenantRpcSmoke = $rpcSmokeExit
         }
+    }
+    $required = @($sdkGateExit, $ibdExit, $healthExit, $wrpcResnapshotExit, $wrpcLiveExit, $proofOfflineExit)
+    $packFailed = ($required | Where-Object { $_ -ne 0 }).Count -gt 0
+    if ($packFailed) {
+        Add-Content -Path $outFile -Value "EVIDENCE PACK FAILED: required exit codes nonzero"
+        Write-Error "integrator evidence pack failed; see $outFile"
     }
     $combined | ConvertTo-Json -Depth 12 | Set-Content -Path $jsonFile -Encoding utf8
     Add-Content -Path $outFile -Value "`ncombined JSON: $jsonFile"

@@ -1,0 +1,41 @@
+# Kaspa dev quickstart — video script (~3 min)
+# Record: terminal + examples/kaspa_frontier_dashboard.html + optional canvas
+# Not consensus. TN10 + Galleon testnet only.
+
+[0:00 HOOK — on screen: BlockDAG graphic from kaspa_frontier_dashboard.html]
+"Most chains force you to wait on one block tip. Kaspa's BlockDAG accepts parallel blocks at ten blocks per second. That's why apps can feel instant — and why Toccata covenants on L1 matter for real programs, not just transfers."
+
+[0:25 PROBLEM — split screen: blocker table]
+"Integrators hit four predictable blockers: no covenant UTXO RPC yet, SDK wheel still catching up, no public wRPC for custody, and no EVM on L1. This repo ships temporary shims for each — same API, swap when native paths land."
+
+[0:45 DEMO 1 — terminal, no keys needed]
+"Path one — zero setup. Run:
+  python examples/dev_quickstart.py --path rest
+You get TN10 Parity Quest against public REST and offline covenant proof verification. No four-hundred-fifty gig disk."
+
+[1:05 DEMO 2 — Galleon]
+"Path two — Galleon testnet. After faucet:
+  python examples/galleon_games.py coin-flip --heads --bet 1.0 --dry-run
+Coin flip, dice, jackpot on gTEST. Not USD — rehearsal only."
+
+[1:25 DEMO 3 — shims JSON]
+"See every blocker and workaround:
+  python scripts/integrator_shims.py --json
+Each row has a swap_when field — when rusty-kaspa issue eleven-twenty-eight or SDK PR seventy-eight merges, you change one env var, not your app."
+
+[1:45 DEMO 4 — integrator API + dashboard]
+"Start the status API:
+  python examples/integrator_api.py --port 8787
+Open examples/kaspa_frontier_dashboard.html — live shim status, DAG visuals, inclusion comparison."
+
+[2:05 FULL NODE — optional clip]
+"If you run owned kaspad:
+  powershell -File scripts/tn10_node_onboard.ps1
+Adoption scorecard goes green at two-of-two healthy nodes. Do not credit deposits on public REST alone."
+
+[2:25 WRAP]
+"Text guide: docs/dev_build_faster.md. Repo: kaspa-frontier-engine on GitHub. Build faster on shims today; flip to native when Core ships. Questions in Kaspa Discord #development."
+
+[END CARD]
+github.com/explife365/kaspa-frontier-engine
+TN10 rehearsal — not mainnet

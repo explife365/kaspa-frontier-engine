@@ -18,6 +18,12 @@ GALLEON_ENTRY_ADDRESS = (
     "kaspatest:qqmstl2znv9tsfgcmj9shme82my867tapz7pdu4ztwdn6sm9452jj5mm0sxzw"
 )
 GALLEON_ENTRY_MIN_SOMPI = 100_000_000
+# KIP-21 Igra lane (post-Toccata). v0/native entries lock tKAS but are not credited on L2.
+IGRA_ENTRY_LANE_SUBNETWORK_ID = bytes.fromhex(
+    "97b1000000000000000000000000000000000000"
+)
+IGRA_ENTRY_TX_VERSION = 1
+IGRA_ENTRY_COMPUTE_BUDGET = 10
 IGRA_FAUCET = "https://faucet.igralabs.com"
 GALLEON_RPC = os.environ.get(
     "GALLEON_RPC", "https://galleon-testnet.igralabs.com:8545"

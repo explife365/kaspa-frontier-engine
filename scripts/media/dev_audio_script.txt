@@ -1,0 +1,14 @@
+# Kaspa dev audio brief (~90 seconds) — Discord voice note or podcast intro
+# Read naturally. TN10 rehearsal, not consensus.
+
+Kaspa isn't another single-chain PoW clone. GHOSTDAG runs ten blocks per second with parallel tips — that's the throughput story integrators actually feel.
+
+If you're building apps today, you don't need to wait for every RPC gap to close. kaspa-frontier-engine ships shims: kascov for covenant UTXOs until getUtxosByCovenantId lands on kaspad, a dev SDK patch for Toccata broadcast until the PyPI wheel ships, and a public-only scorecard when you don't have four hundred fifty gigs for IBD.
+
+Three speeds. No disk? Run dev_quickstart with path rest — parity quest plus offline proofs. Got Galleon faucet gas? Play coin flip and dice on gTEST. Running nodes? tn10_node_onboard gets you a two-of-two deposit gate.
+
+One JSON tells you what's shim versus native: integrator_shims.py. When blockers clear, swap_when in that file is your migration checklist — no rewrite.
+
+Visual dashboard and video script are in the repo under scripts/media and docs/dev_build_faster.md. Link in chat if you want the HTML dashboard — it polls the integrator API live.
+
+Build faster on testnet. Fail closed on mainnet claims. That's the deal.

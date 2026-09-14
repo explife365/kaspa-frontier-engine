@@ -1,0 +1,25 @@
+#smart-contract-brainstorming or #ecosystem-projects — Kaspa DeFi games (TN10 + Galleon)
+
+---
+
+**Kaspa DeFi games are live on Galleon testnet (rehearsal)**
+
+Three on-chain games + one free L1 quest — built on gTEST / TN10 REST, not mainnet:
+
+| Game | Chain | How to play |
+|------|-------|-------------|
+| Coin Flip | Galleon L2 | Bet gTEST heads/tails — 1.96x payout |
+| Kaspa Dice | Galleon L2 | Guess 1-6 — 4.5x on match |
+| Jackpot | Galleon L2 | Buy hourly tickets, draw winner |
+| Parity Quest | TN10 REST | Guess even/odd virtual DAA (no gas) |
+
+```bash
+python examples/galleon_games.py list
+python examples/galleon_games.py deploy --simulate
+python examples/galleon_games.py coin-flip --heads --bet 1.0 --dry-run
+python examples/galleon_games.py parity --rounds 3
+```
+
+Repo: https://github.com/explife365/kaspa-frontier-engine
+
+Fail-closed: testnet only, gTEST is not USD, blockhash randomness is demo-grade (not production gambling). L1 covenant parity games (commit-reveal) are the next step — same pattern as DD12's even/odd on TN10.

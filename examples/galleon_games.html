@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Galleon DeFi Games</title>
+  <style>
+    :root { --bg:#0b0f14; --card:#141c26; --border:#2a3a50; --text:#e8eef7; --muted:#8b9cb3; --accent:#f5a623; --ok:#70e0a8; --font:system-ui,sans-serif; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:var(--font); background:var(--bg); color:var(--text); min-height:100vh; }
+    header { padding:1.5rem 2rem; border-bottom:1px solid var(--border); }
+    h1 { margin:0 0 .35rem; font-size:1.35rem; }
+    .sub { color:var(--muted); font-size:.9rem; max-width:560px; }
+    main { max-width:720px; margin:2rem auto; padding:0 1rem 3rem; display:grid; gap:1rem; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:1.25rem; }
+    .grid { display:grid; gap:1rem; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); }
+    .stat { font-size:.85rem; color:var(--muted); line-height:1.55; }
+    .stat strong { color:var(--text); display:block; font-size:1.1rem; margin-bottom:.15rem; }
+    label { font-size:.75rem; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+    .cmd { display:flex; gap:.5rem; margin-top:.5rem; }
+    .cmd input { flex:1; padding:.55rem .65rem; border-radius:8px; border:1px solid var(--border); background:#0a1018; color:var(--text); font-size:.8rem; font-family:ui-monospace,monospace; }
+    button { padding:.55rem .85rem; border:none; border-radius:8px; background:var(--accent); color:#0b0f14; font-weight:600; cursor:pointer; font-size:.85rem; }
+    button.secondary { background:transparent; border:1px solid var(--border); color:var(--text); }
+    .warn { color:var(--accent); font-size:.82rem; margin-top:.75rem; line-height:1.45; }
+    .links { display:flex; flex-wrap:wrap; gap:.6rem; margin-top:.75rem; }
+    .links a { color:var(--ok); text-decoration:none; font-size:.85rem; border:1px solid var(--border); padding:.35rem .65rem; border-radius:6px; }
+    #err { color:#ff6b6b; font-size:.85rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Galleon DeFi Games</h1>
+    <p class="sub">Live stats from integrator API. Swaps and plays use the Python CLI (wallet in kaspa.env). Run <code>python examples/integrator_api.py</code> first.</p>
+  </header>
+  <main>
+    <div class="card" id="stats">Loading…</div>
+    <div class="card">
+      <label>Quick commands (copy → terminal)</label>
+      <div id="cmds"></div>
+      <p class="warn">Before first play: send ~20 gTEST to each game contract for winner payouts (bankroll). Min bet 0.1 gTEST.</p>
+    </div>
+    <div class="card links">
+      <a href="galleon_dex.html">DEX quotes</a>
+      <a href="dev_portal.html">Dev portal</a>
+      <a href="kaspa_frontier_dashboard.html">Frontier dashboard</a>
+    </div>
+    <div id="err"></div>
+  </main>
+  <script>
+    const API = "http://127.0.0.1:8787";
+    const statsEl = document.getElementById("stats");
+    const cmdsEl = document.getElementById("cmds");
+    const errEl = document.getElementById("err");
+
+    function cmdRow(label, text) {
+      const wrap = document.createElement("div");
+      wrap.style.marginTop = ".75rem";
+      wrap.innerHTML = `<label>${label}</label>`;
+      const row = document.createElement("div");
+      row.className = "cmd";
+      const inp = document.createElement("input");
+      inp.readOnly = true;
+      inp.value = text;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = "Copy";
+      btn.onclick = () => navigator.clipboard.writeText(text);
+      row.appendChild(inp);
+      row.appendChild(btn);
+      wrap.appendChild(row);
+      return wrap;
+    }
+
+    async function load() {
+      errEl.textContent = "";
+      try {
+        const r = await fetch(API + "/v1/games/status");
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || r.statusText);
+        const jk = j.jackpot;
+        const draw = jk.draw_ready ? "ready now" : Math.round(jk.seconds_until_draw / 60) + " min";
+        statsEl.innerHTML = `<div class="grid">
+          <div class="stat"><strong>${j.gtest_balance.toFixed(2)}</strong>gTEST wallet</div>
+          <div class="stat"><strong>${j.coin_flip.games_played}</strong>coin flips played</div>
+          <div class="stat"><strong>${j.dice.rolls}</strong>dice rolls</div>
+          <div class="stat"><strong>${jk.tickets}</strong>jackpot tickets · ${jk.pot_gtest} gTEST pot</div>
+        </div>
+        <p class="warn" style="margin-top:1rem">Jackpot draw: ${draw} · ticket ${jk.ticket_price_gtest} gTEST</p>`;
+        cmdsEl.innerHTML = "";
+        Object.entries(j.cli).forEach(([k, v]) => cmdsEl.appendChild(cmdRow(k.replace(/_/g, " "), v)));
+        (j.notes || []).forEach(n => {
+          const p = document.createElement("p");
+          p.className = "warn";
+          p.textContent = n;
+          cmdsEl.appendChild(p);
+        });
+      } catch (e) {
+        statsEl.textContent = "Start API: python examples/integrator_api.py";
+        errEl.textContent = String(e);
+        cmdsEl.appendChild(cmdRow("coin flip", "python examples/galleon_games.py coin-flip --heads --bet 0.1 --broadcast"));
+      }
+    }
+    load();
+    setInterval(load, 30000);
+  </script>
+</body>
+</html>

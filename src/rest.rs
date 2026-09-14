@@ -189,6 +189,18 @@ pub struct ToccataTxInput {
         deserialize_with = "de_opt_u32_from_string_or_number"
     )]
     pub previous_outpoint_index: Option<u32>,
+    #[serde(
+        default,
+        alias = "previousOutpointAddress",
+        alias = "previous_outpoint_address"
+    )]
+    pub previous_outpoint_address: Option<String>,
+    #[serde(
+        default,
+        alias = "previousOutpointAmount",
+        deserialize_with = "de_opt_u64_from_string_or_number"
+    )]
+    pub previous_outpoint_amount: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -201,6 +213,14 @@ pub struct ToccataTxOutput {
     pub covenant_authorizing_input: Option<u32>,
     #[serde(default, alias = "scriptPublicKeyType")]
     pub script_public_key_type: Option<String>,
+    #[serde(
+        default,
+        alias = "scriptPublicKeyAddress",
+        alias = "script_public_key_address"
+    )]
+    pub script_public_key_address: Option<String>,
+    #[serde(default, alias = "scriptPublicKey", alias = "script_public_key")]
+    pub script_public_key: Option<String>,
 }
 
 impl ToccataTx {

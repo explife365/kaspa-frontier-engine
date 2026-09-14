@@ -72,5 +72,9 @@ path = "src/bin/tn10_outbox_receiver.rs"
 name = "tn10-node-health"
 path = "src/bin/tn10_node_health.rs"
 
+[[bin]]
+name = "tn10-return-address"
+path = "src/bin/tn10_return_address.rs"
+
 [dev-dependencies]
 tempfile = "=3.13.0"

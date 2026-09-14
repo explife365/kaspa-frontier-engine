@@ -20,6 +20,9 @@ from galleon import (  # noqa: E402
     GALLEON_RELAY_GAS_WEI,
     GALLEON_TEST_USDC,
     GALLEON_WRAPPED_IKAS,
+    IGRA_ENTRY_COMPUTE_BUDGET,
+    IGRA_ENTRY_LANE_SUBNETWORK_ID,
+    IGRA_ENTRY_TX_VERSION,
     IGRA_MAINNET_CHAIN_ID,
     IGRA_MAINNET_HYPERLANE_USDC,
     NATIVE_TRANSFER_GAS,
@@ -73,6 +76,16 @@ class CircleUsdcTests(unittest.TestCase):
         self.assertFalse(is_circle_usdc(IGRA_MAINNET_CHAIN_ID, IGRA_MAINNET_HYPERLANE_USDC))
         self.assertNotEqual(
             IGRA_MAINNET_HYPERLANE_USDC.lower(), CIRCLE_USDC_ETHEREUM.lower()
+        )
+
+
+class EntryLaneTests(unittest.TestCase):
+    def test_igra_lane_subnetwork(self) -> None:
+        self.assertEqual(IGRA_ENTRY_TX_VERSION, 1)
+        self.assertEqual(IGRA_ENTRY_COMPUTE_BUDGET, 10)
+        self.assertEqual(
+            IGRA_ENTRY_LANE_SUBNETWORK_ID.hex(),
+            "97b1000000000000000000000000000000000000",
         )
 
 

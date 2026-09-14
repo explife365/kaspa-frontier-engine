@@ -32,7 +32,7 @@ SELECTOR_QUOTE_SWAP = "0x3ab1dee3"
 # keccak256("swap(uint256,bool,uint256)")[:4]
 SELECTOR_SWAP = "0x4312ae31"
 APPROVE_GAS = 55_000
-SWAP_GAS = 75_000
+SWAP_GAS = 120_000  # FeePool swap ~97k; 75k OOG on Galleon
 
 
 def _encode_uint256(value: int) -> str:

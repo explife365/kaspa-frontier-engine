@@ -66,6 +66,20 @@ BLOCKERS: tuple[BlockerShim, ...] = (
         unblock="Independently hosted nodes per integrator",
         swap_command="integrator_shims.owned_node_urls()",
     ),
+    BlockerShim(
+        id="return_address_rpc",
+        blocker="No kaspad RPC for deposit sender address (rusty-kaspa#435)",
+        shim="tn10-return-address REST chain-walk",
+        unblock="rusty-kaspa#435 native RPC",
+        swap_command="cargo run --release --bin tn10-return-address -- <txid>",
+    ),
+    BlockerShim(
+        id="tx_input_enrichment",
+        blocker="GetBlocks/GetVirtualChain lack full input UTXO data (rusty-kaspa#615)",
+        shim="REST previous_outpoint_amount when present; tn10-return-address --fee",
+        unblock="rusty-kaspa PR #906 GetBlocksV2 on owned node",
+        swap_command="cargo run --release --bin tn10-return-address -- <txid> --fee",
+    ),
 )
 
 

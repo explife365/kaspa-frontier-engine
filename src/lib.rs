@@ -29,6 +29,7 @@ pub mod owned_node;
 pub mod owned_node_gate;
 pub mod proof;
 pub mod rest;
+pub mod return_address;
 pub mod roadmap;
 pub mod rpc;
 pub mod telemetry;
@@ -82,6 +83,9 @@ pub use owned_node_gate::{
 pub use proof::{
     CovenantProof, CovenantProofStep, KascovProofSummary, ProofStepReport,
     ProofVerificationReport,
+};
+pub use return_address::{
+    estimate_tx_fee_from_toccata, resolve_return_address, ReturnAddressReport, TxFeeReport,
 };
 pub use rest::{
     AddressBalance, AddressUtxo, BlockDagInfo, FeeEstimate, HashrateInfo, StatusSnapshot,

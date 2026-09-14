@@ -1,0 +1,27 @@
+**Proposal: TN10 integrator custody journal (CEX deposit rehearsal)**
+
+**Problem**
+Exchanges integrating Kaspa need owned-node deposit detection with reorg safety, withdrawal observation, and fail-closed health gates. Public REST alone is not sufficient to credit deposits.
+
+**What is live in kaspa-frontier-engine (rehearsal, not consensus)**
+- 2/2 owned TN10 nodes with N-of-M gate (node1 loopback + host02 tunnel)
+- wRPC subscribe + REST resnapshot deposit journal (SQLite)
+- Durable deposit outbox + idempotent webhook receiver (mTLS for non-loopback)
+- Return-address resolver for deposits (rusty-kaspa#435 integrator path until native RPC)
+- TX fee enrichment notes for rusty-kaspa#615 / GetBlocksV2 (PR #906)
+
+**Evidence (Sep 14 2026)**
+- Adoption gate: **2/2 green**
+- Evidence pack: `powershell -File scripts/integrator_evidence_pack.ps1`
+- Artifact: `.local/evidence/evidence_20260914-153336.json` (gist: https://gist.github.com/explife365/477afea386ddba43574c7cb841ad4c73)
+
+**Funding ask**
+Milestone-based KAS from the public dev fund for mainnet hardening:
+1. Hosted dual-node reference deployment (not SSH tunnel) + runbook
+2. Integrator API auth, rate limits, tenant isolation
+3. Exchange pilot: one production deposit address on TN10 → mainnet cutover doc
+4. Upstream: review/support GetBlocksV2 (#906) + native return-address RPC (#435)
+
+**Repo:** https://github.com/explife365/kaspa-frontier-engine
+
+Not a kaspad consensus change. Not production CEX custody without independent audit.

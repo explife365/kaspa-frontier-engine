@@ -31,6 +31,7 @@ struct Options {
     rest: String,
     database: PathBuf,
     resnapshot_only: bool,
+    max_live_seconds: Option<u64>,
 }
 
 fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, String> {
@@ -42,6 +43,7 @@ fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, St
     let mut rest = TESTNET_10_REST.to_string();
     let mut database = PathBuf::from(".local/tn10-wrpc-live.sqlite");
     let mut resnapshot_only = false;
+    let mut max_live_seconds = None;
     let mut dual = false;
     let mut args = arguments.into_iter();
     while let Some(argument) = args.next() {
@@ -52,6 +54,14 @@ fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, St
             "--rest" => rest = args.next().ok_or("--rest needs a value")?,
             "--database" => database = PathBuf::from(args.next().ok_or("--database needs a path")?),
             "--resnapshot-only" => resnapshot_only = true,
+            "--max-live-seconds" => {
+                max_live_seconds = Some(
+                    args.next()
+                        .ok_or("--max-live-seconds needs a value")?
+                        .parse()
+                        .map_err(|_| "--max-live-seconds must be a positive integer")?,
+                );
+            }
             _ if argument.starts_with('-') => return Err(format!("unknown flag {argument}")),
             _ => addresses.push(argument),
         }
@@ -78,11 +88,12 @@ fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Options, St
         rest,
         database,
         resnapshot_only,
+        max_live_seconds,
     })
 }
 
 fn usage() -> &'static str {
-    "usage: tn10-wrpc-live ADDRESS [ADDRESS ...] [--url ws://127.0.0.1:18210]... [--dual] [--min-healthy N] [--require-healthy N] [--rest HTTPS] [--database PATH] [--max-daa-lag 100] [--resnapshot-only]"
+    "usage: tn10-wrpc-live ADDRESS [ADDRESS ...] [--url ws://127.0.0.1:18210]... [--dual] [--min-healthy N] [--require-healthy N] [--rest HTTPS] [--database PATH] [--max-daa-lag 100] [--resnapshot-only] [--max-live-seconds N]"
 }
 
 async fn fetch_utxo_snapshot(
@@ -482,7 +493,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         let url = options.gate.urls[node_index].clone();
         println!("connecting  {url}");
-        match run_connection(
+        let connection = run_connection(
             &options,
             &url,
             &rest,
@@ -490,11 +501,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &mut ledger,
             &mut projection,
             &source,
-        )
-        .await
-        {
+        );
+        let connection_result = if let Some(secs) = options.max_live_seconds {
+            match tokio::time::timeout(Duration::from_secs(secs), connection).await {
+                Ok(result) => result,
+                Err(_) => {
+                    println!("max-live-seconds {secs} reached; journal persisted");
+                    return Ok(());
+                }
+            }
+        } else {
+            connection.await
+        };
+        match connection_result {
             Ok(()) => unreachable!("wRPC connection loop only returns on failure"),
             Err(error) => eprintln!("wRPC failover from {url}: {error}"),
+        }
+        if options.max_live_seconds.is_some() {
+            return Ok(());
         }
         let (next_index, found_healthy) =
             match next_owned_node(
