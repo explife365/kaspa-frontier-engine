@@ -226,6 +226,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/v1/evidence/latest", get(evidence_latest))
         .route("/v1/watchlist", get(get_watchlist).post(set_watchlist))
         .route("/v1/webhooks/test", post(webhook_test))
+        .route("/v1/pilot/summary", get(pilot_summary))
         .with_state(state)
         .layer(ServiceBuilder::new().layer(ConcurrencyLimitLayer::new(MAX_CONCURRENT)))
 }
@@ -357,7 +358,8 @@ async fn openapi() -> Json<serde_json::Value> {
             "/v1/fee-estimate/{txid}": { "get": { "summary": "TX fee estimate", "security": [{"integratorKey": []}] } },
             "/v1/evidence/latest": { "get": { "summary": "Latest evidence JSON", "security": [{"integratorKey": []}] } },
             "/v1/watchlist": { "get": { "summary": "Watched deposit addresses" }, "post": { "summary": "Set watchlist" } },
-            "/v1/webhooks/test": { "post": { "summary": "Send test webhook payload" } }
+            "/v1/webhooks/test": { "post": { "summary": "Send test webhook payload" } },
+            "/v1/pilot/summary": { "get": { "summary": "CEX pilot week-1 handoff snapshot", "security": [{"integratorKey": []}] } }
         },
         "components": {
             "securitySchemes": {
@@ -633,6 +635,40 @@ async fn set_watchlist(
     Ok(Json(file))
 }
 
+async fn pilot_summary(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, Response> {
+    let tenant = auth_tenant(&state, &headers).map_err(map_err)?;
+    let gate = fetch_gate_summary(&state).await.map_err(map_err)?;
+    let ledger = state.deposit_ledger.lock().await;
+    let state_counts = ledger.deposit_state_counts().map_err(map_err)?;
+    let pending_outbox = ledger
+        .outbox_statuses(false)
+        .map_err(map_err)?
+        .len();
+    let watchlist = read_watchlist(&state.config.watchlist_path).map_err(map_err)?;
+    let evidence = latest_evidence_path(&state.config.evidence_dir)
+        .ok()
+        .and_then(|path| path.file_name().map(|name| name.to_string_lossy().to_string()));
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "tenant": tenant,
+        "pilotWeek": 1,
+        "notConsensus": true,
+        "network": state.config.network,
+        "confirmationDaa": state.config.confirmation_daa,
+        "gate": gate_summary_to_json(&gate),
+        "deposits": state_counts,
+        "outboxPending": pending_outbox,
+        "watchlist": watchlist.addresses,
+        "evidenceFile": evidence,
+        "repo": "https://github.com/explife365/kaspa-frontier-engine",
+        "openapi": "/openapi.json",
+        "gist": "https://gist.github.com/explife365/477afea386ddba43574c7cb841ad4c73"
+    })))
+}
+
 async fn webhook_test(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -800,6 +836,26 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert!(json["ok"].as_bool().unwrap());
         assert_eq!(json["count"], 0);
+    }
+
+    #[tokio::test]
+    async fn pilot_summary_returns_journal_counts() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = build_router(test_state(&dir));
+        let response = app
+            .oneshot(
+                Request::get("/v1/pilot/summary")
+                    .header("x-integrator-key", "test-secret-key")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["pilotWeek"], 1);
+        assert_eq!(json["tenant"], "pilot");
     }
 
     #[tokio::test]

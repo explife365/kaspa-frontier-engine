@@ -138,6 +138,12 @@ paths:
                   minItems: 1
                   maxItems: 100
                   items: { type: string }
+  /v1/pilot/summary:
+    get:
+      summary: CEX pilot week-1 handoff snapshot (gate, deposits, outbox, watchlist)
+      responses:
+        "200":
+          description: Pilot readiness JSON
   /v1/webhooks/test:
     post:
       summary: Send signed test webhook payload

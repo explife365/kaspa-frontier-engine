@@ -2,7 +2,7 @@ Follow-up reply template (paste in Discord funding thread):
 
 ---
 
-**TN10 integrator update (Sep 14 2026)**
+**TN10 integrator update (Sep 14 2026, evidence `evidence_20260914-194553`)**
 
 Stack live on owned nodes — gate **2/2 green**, custody API on loopback `:8787`, demo dashboard `:8788`.
 

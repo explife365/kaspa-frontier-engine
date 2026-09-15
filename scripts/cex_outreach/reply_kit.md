@@ -30,6 +30,8 @@ Exchange provides: hot wallet keys, deposit address generation, staging webhook 
 API base:     https://<your-staging-host>/  (mTLS in production)
 Auth header:  X-Integrator-Key: <pilot-key>
 Gate check:   GET /v1/gate
+Handoff:      powershell -File scripts/integrator_pilot_bundle.ps1
+Summary:      GET /v1/pilot/summary
 Watchlist:    POST /v1/watchlist  {"addresses":["kaspatest:..."]}
 Poll:         GET /v1/deposits?state=credited
 Outbox:       GET /v1/outbox

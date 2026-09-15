@@ -1,4 +1,6 @@
-# CEX outreach status (Sep 14 2026)
+# CEX outreach status (updated Sep 15 2026)
+
+**Daily audit:** `powershell -File scripts/cex_outreach/check_channels.ps1`
 
 From: explife365@gmail.com
 
@@ -30,9 +32,12 @@ Do **not** retry `listing@bybit.com` from the same Gmail account repeatedly (can
 - [x] Watchlist registered on custody API
 - [x] Jackpot round 0 drawn (tx `0xd9801183…b12f25`, round 1 live, ends `1789447062`)
 - [x] Outbox webhook deliver — 10/10 credit events → `http://127.0.0.1:18320/kaspa-events` (outbox empty)
+- [x] Evidence pack refreshed — `.local/evidence/evidence_20260914-194553.json` (148 Rust + 138 pytest OK)
 - [ ] **Discord** — paste `discord_funding_followup.txt` in funding thread (updated Sep 14 PM)
 - [ ] **Bybit** — LinkedIn / help form (`bybit_linkedin.txt`); do not resend listing@bybit.com
 - [x] **Video** — `C:\Users\Admin2\IONOS HiDrive\Build Files\Kaspa Video\out\kaspa_dev_quickstart.mp4` (~9.7 MB, Sep 14 2026)
 - [ ] **CEX day 5–7** (Sep 19–21) — `open_followup_drafts.ps1` if no reply
+- [ ] **Pilot handoff** — `integrator_pilot_bundle.ps1` when replying; `GET /v1/pilot/summary`
+- [ ] **Stack** — nodes were down Sep 15 AM; restart kaspad + `integrator_stack.ps1`
 
 Operator checklist: `powershell -File scripts/cex_outreach/run_remaining.ps1`

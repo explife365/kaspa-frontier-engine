@@ -60,6 +60,21 @@ if ($args -contains "--status") {
 # Stop stale instances
 Stop-StackProcesses
 
+Write-Host "Preflight: owned-node gate..."
+$gateLine = cargo run --release --bin tn10-node-health -- --dual --min-healthy $env:TN10_MIN_HEALTHY --json 2>&1 | Select-Object -Last 1
+try {
+    $gate = $gateLine | ConvertFrom-Json
+    if (-not $gate.healthy) {
+        Write-Warning "Gate RED ($($gate.healthyNodes)/$($gate.requiredHealthyNodes)). Start kaspad + host02 tunnel before ingest."
+        Write-Host "  powershell -File scripts/tn10_kaspad.ps1"
+        Write-Host "  powershell -File scripts/tn10_host02_tunnel.ps1"
+    } else {
+        Write-Host "Gate green $($gate.healthyNodes)/$($gate.requiredHealthyNodes)"
+    }
+} catch {
+    Write-Warning "Could not parse gate JSON — nodes may be down."
+}
+
 $minHealthy = [string]$env:TN10_MIN_HEALTHY
 $depositDb = [string]$env:TN10_DEPOSIT_DATABASE
 

@@ -489,6 +489,25 @@ impl DepositLedger {
             .map_err(EngineError::from)
     }
 
+    pub fn deposit_state_counts(&self) -> Result<std::collections::HashMap<String, u64>> {
+        let mut statement = self.conn.prepare(
+            "SELECT state, COUNT(*) FROM deposits GROUP BY state",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        let mut counts = std::collections::HashMap::new();
+        for row in rows {
+            let (state, count) = row?;
+            counts.insert(
+                state,
+                u64::try_from(count)
+                    .map_err(|_| EngineError::Message("invalid deposit state count".into()))?,
+            );
+        }
+        Ok(counts)
+    }
+
     pub fn pending_count(&self) -> Result<usize> {
         let count: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM deposits WHERE state='pending'",
