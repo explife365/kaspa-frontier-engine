@@ -37,6 +37,7 @@ Do **not** retry `listing@bybit.com` from the same Gmail account repeatedly (can
 - [ ] **Bybit** — LinkedIn / help form (`bybit_linkedin.txt`); do not resend listing@bybit.com
 - [x] **Video** — `C:\Users\Admin2\IONOS HiDrive\Build Files\Kaspa Video\out\kaspa_dev_quickstart.mp4` (~9.7 MB, Sep 14 2026)
 - [ ] **CEX day 5–7** (Sep 19–21) — `open_followup_drafts.ps1` if no reply
+- [x] **Bonus API** — selftest, deposits/export, receiver/stats, webhooks/verify (`integrator_selftest.ps1`)
 - [ ] **Pilot handoff** — `integrator_pilot_bundle.ps1` when replying; `GET /v1/pilot/summary`
 - [ ] **Stack** — nodes were down Sep 15 AM; restart kaspad + `integrator_stack.ps1`
 

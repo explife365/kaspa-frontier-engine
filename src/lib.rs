@@ -45,7 +45,7 @@ pub use cex::{
 pub use covenant::{CovenantError, CovenantPolicyEngine, NativeCovenantUtxo};
 pub use deposit_ledger::{
     ClaimedLedgerEvent, DeliveryFailureOutcome, DepositLedger, DepositRecord, LedgerEvent,
-    OutboxEventStatus,
+    OutboxEventStatus, OutboxStats,
 };
 pub use erc20::Erc20Meta;
 pub use error::{EngineError, Result};

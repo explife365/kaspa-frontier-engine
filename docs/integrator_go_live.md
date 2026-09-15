@@ -51,6 +51,17 @@ Header: `X-Integrator-Key: your-long-random-key`
 | GET | `/v1/evidence/latest` | Latest evidence JSON |
 | GET/POST | `/v1/watchlist` | Register deposit addresses |
 | POST | `/v1/webhooks/test` | `{"url":"..."}` test payload + HMAC |
+| POST | `/v1/webhooks/verify` | `{"body":"...","signature":"sha256=..."}` HMAC check |
+| GET | `/v1/pilot/selftest` | Pre-flight readiness checks |
+| GET | `/v1/deposits/export` | `?format=csv\|ndjson&limit=1000` journal export |
+| GET | `/v1/receiver/stats` | Webhook receiver inbox count |
+
+Full E2E test:
+
+```powershell
+powershell -File scripts/integrator_selftest.ps1
+python -m unittest tests.test_integrator_custody_api -v
+```
 
 Custody routes return **503** when owned-node gate is red (`INTEGRATOR_REQUIRE_GATE=1`).
 

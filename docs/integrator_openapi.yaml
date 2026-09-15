@@ -144,6 +144,35 @@ paths:
       responses:
         "200":
           description: Pilot readiness JSON
+  /v1/pilot/selftest:
+    get:
+      summary: Pre-flight readiness checks (DB, gate, receiver, watchlist)
+  /v1/deposits/export:
+    get:
+      summary: Export deposit journal
+      parameters:
+        - name: format
+          in: query
+          schema: { type: string, enum: [ndjson, csv], default: ndjson }
+        - name: limit
+          in: query
+          schema: { type: integer, maximum: 10000 }
+  /v1/receiver/stats:
+    get:
+      summary: Webhook receiver inbox event count
+  /v1/webhooks/verify:
+    post:
+      summary: Verify HMAC-SHA256 webhook signature
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body, signature]
+              properties:
+                body: { type: string }
+                signature: { type: string }
   /v1/webhooks/test:
     post:
       summary: Send signed test webhook payload

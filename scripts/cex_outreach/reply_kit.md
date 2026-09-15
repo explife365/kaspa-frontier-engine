@@ -32,6 +32,9 @@ Auth header:  X-Integrator-Key: <pilot-key>
 Gate check:   GET /v1/gate
 Handoff:      powershell -File scripts/integrator_pilot_bundle.ps1
 Summary:      GET /v1/pilot/summary
+Selftest:     powershell -File scripts/integrator_selftest.ps1
+Export:       GET /v1/deposits/export?format=csv
+Verify HMAC:  POST /v1/webhooks/verify
 Watchlist:    POST /v1/watchlist  {"addresses":["kaspatest:..."]}
 Poll:         GET /v1/deposits?state=credited
 Outbox:       GET /v1/outbox

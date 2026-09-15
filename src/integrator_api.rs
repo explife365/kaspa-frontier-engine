@@ -2,7 +2,8 @@
 //!
 //! Auth, gate fail-closed, deposit/outbox/withdraw reads, return-address, evidence.
 
-use crate::deposit_ledger::{DepositLedger, OutboxEventStatus};
+use crate::deposit_ledger::{DepositLedger, DepositRecord, OutboxEventStatus};
+use crate::outbox_receiver::OutboxReceiverStore;
 use crate::error::EngineError;
 use crate::network::is_valid_testnet_address;
 use crate::owned_node_gate::{
@@ -35,7 +36,9 @@ const DEFAULT_DEPOSIT_DB: &str = ".local/tn10-wrpc-live.sqlite";
 const DEFAULT_WITHDRAW_DB: &str = ".local/tn10-withdrawals.sqlite";
 const DEFAULT_WATCHLIST: &str = ".local/integrator_watchlist.json";
 const DEFAULT_EVIDENCE_DIR: &str = ".local/evidence";
+const DEFAULT_RECEIVER_DB: &str = ".local/tn10-outbox-receiver.sqlite";
 const MAX_CONCURRENT: usize = 64;
+const EXPORT_MAX_ROWS: u64 = 10_000;
 
 #[derive(Clone)]
 pub struct IntegratorConfig {
@@ -44,6 +47,7 @@ pub struct IntegratorConfig {
     pub withdrawal_database: PathBuf,
     pub watchlist_path: PathBuf,
     pub evidence_dir: PathBuf,
+    pub receiver_database: PathBuf,
     pub api_keys: HashMap<String, String>,
     pub webhook_secret: Option<String>,
     pub confirmation_daa: u64,
@@ -72,6 +76,20 @@ pub struct DepositListQuery {
     pub state: Option<String>,
     pub limit: Option<u64>,
     pub offset: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DepositExportQuery {
+    pub address: Option<String>,
+    pub state: Option<String>,
+    pub format: Option<String>,
+    pub limit: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct WebhookVerifyBody {
+    pub body: String,
+    pub signature: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -151,6 +169,10 @@ pub fn load_config() -> EngineResult<IntegratorConfig> {
         std::env::var("INTEGRATOR_EVIDENCE_DIR")
             .unwrap_or_else(|_| DEFAULT_EVIDENCE_DIR.to_string()),
     );
+    let receiver_database = PathBuf::from(
+        std::env::var("INTEGRATOR_RECEIVER_DATABASE")
+            .unwrap_or_else(|_| DEFAULT_RECEIVER_DB.to_string()),
+    );
     let confirmation_daa = std::env::var("INTEGRATOR_CONFIRMATION_DAA")
         .ok()
         .and_then(|raw| raw.parse().ok())
@@ -178,6 +200,7 @@ pub fn load_config() -> EngineResult<IntegratorConfig> {
         withdrawal_database,
         watchlist_path,
         evidence_dir,
+        receiver_database,
         api_keys,
         webhook_secret,
         confirmation_daa,
@@ -227,6 +250,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/v1/watchlist", get(get_watchlist).post(set_watchlist))
         .route("/v1/webhooks/test", post(webhook_test))
         .route("/v1/pilot/summary", get(pilot_summary))
+        .route("/v1/pilot/selftest", get(pilot_selftest))
+        .route("/v1/deposits/export", get(export_deposits))
+        .route("/v1/receiver/stats", get(receiver_stats))
+        .route("/v1/webhooks/verify", post(webhook_verify))
         .with_state(state)
         .layer(ServiceBuilder::new().layer(ConcurrencyLimitLayer::new(MAX_CONCURRENT)))
 }
@@ -359,7 +386,11 @@ async fn openapi() -> Json<serde_json::Value> {
             "/v1/evidence/latest": { "get": { "summary": "Latest evidence JSON", "security": [{"integratorKey": []}] } },
             "/v1/watchlist": { "get": { "summary": "Watched deposit addresses" }, "post": { "summary": "Set watchlist" } },
             "/v1/webhooks/test": { "post": { "summary": "Send test webhook payload" } },
-            "/v1/pilot/summary": { "get": { "summary": "CEX pilot week-1 handoff snapshot", "security": [{"integratorKey": []}] } }
+            "/v1/pilot/summary": { "get": { "summary": "CEX pilot week-1 handoff snapshot", "security": [{"integratorKey": []}] } },
+            "/v1/pilot/selftest": { "get": { "summary": "Pre-flight readiness checks", "security": [{"integratorKey": []}] } },
+            "/v1/deposits/export": { "get": { "summary": "Export deposit journal (ndjson or csv)", "security": [{"integratorKey": []}] } },
+            "/v1/receiver/stats": { "get": { "summary": "Webhook receiver inbox stats", "security": [{"integratorKey": []}] } },
+            "/v1/webhooks/verify": { "post": { "summary": "Verify HMAC webhook signature", "security": [{"integratorKey": []}] } }
         },
         "components": {
             "securitySchemes": {
@@ -643,11 +674,9 @@ async fn pilot_summary(
     let gate = fetch_gate_summary(&state).await.map_err(map_err)?;
     let ledger = state.deposit_ledger.lock().await;
     let state_counts = ledger.deposit_state_counts().map_err(map_err)?;
-    let pending_outbox = ledger
-        .outbox_statuses(false)
-        .map_err(map_err)?
-        .len();
+    let outbox_stats = ledger.outbox_stats().map_err(map_err)?;
     let watchlist = read_watchlist(&state.config.watchlist_path).map_err(map_err)?;
+    let receiver_inbox = receiver_inbox_count(&state.config.receiver_database);
     let evidence = latest_evidence_path(&state.config.evidence_dir)
         .ok()
         .and_then(|path| path.file_name().map(|name| name.to_string_lossy().to_string()));
@@ -660,13 +689,261 @@ async fn pilot_summary(
         "confirmationDaa": state.config.confirmation_daa,
         "gate": gate_summary_to_json(&gate),
         "deposits": state_counts,
-        "outboxPending": pending_outbox,
+        "outbox": outbox_stats,
+        "receiverInbox": receiver_inbox,
         "watchlist": watchlist.addresses,
         "evidenceFile": evidence,
         "repo": "https://github.com/explife365/kaspa-frontier-engine",
         "openapi": "/openapi.json",
         "gist": "https://gist.github.com/explife365/477afea386ddba43574c7cb841ad4c73"
     })))
+}
+
+async fn pilot_selftest(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, Response> {
+    let tenant = auth_tenant(&state, &headers).map_err(map_err)?;
+    let mut checks: Vec<serde_json::Value> = Vec::new();
+    checks.push(json_check(
+        "deposit_database",
+        state.config.deposit_database.is_file(),
+        state.config.deposit_database.display().to_string(),
+    ));
+    checks.push(json_check(
+        "withdrawal_database",
+        state.config.withdrawal_database.is_file(),
+        state.config.withdrawal_database.display().to_string(),
+    ));
+    checks.push(json_check(
+        "webhook_secret",
+        state.config.webhook_secret.is_some(),
+        if state.config.webhook_secret.is_some() {
+            "configured"
+        } else {
+            "missing INTEGRATOR_WEBHOOK_SECRET"
+        },
+    ));
+    let ledger_ok = state.deposit_ledger.lock().await.deposit_state_counts().is_ok();
+    checks.push(json_check("deposit_ledger", ledger_ok, "sqlite readable"));
+    let gate = fetch_gate_summary(&state).await;
+    match gate {
+        Ok(summary) => {
+            checks.push(json_check(
+                "owned_node_gate",
+                summary.gate_healthy,
+                format!(
+                    "{}/{} healthy",
+                    summary.healthy_nodes, summary.required_healthy
+                ),
+            ));
+        }
+        Err(err) => {
+            checks.push(json_check("owned_node_gate", false, err.to_string()));
+        }
+    }
+    let receiver = receiver_inbox_count(&state.config.receiver_database);
+    checks.push(json_check(
+        "receiver_inbox",
+        receiver.get("ok").and_then(|v| v.as_bool()).unwrap_or(false),
+        receiver
+            .get("count")
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "n/a".into()),
+    ));
+    let watchlist = read_watchlist(&state.config.watchlist_path).map_err(map_err)?;
+    checks.push(json_check(
+        "watchlist",
+        !watchlist.addresses.is_empty(),
+        format!("{} addresses", watchlist.addresses.len()),
+    ));
+    let evidence_ok = latest_evidence_path(&state.config.evidence_dir).is_ok();
+    checks.push(json_check("evidence_pack", evidence_ok, "latest JSON present"));
+    let ok = checks.iter().all(|check| check["ok"].as_bool().unwrap_or(false));
+    Ok(Json(serde_json::json!({
+        "ok": ok,
+        "tenant": tenant,
+        "notConsensus": true,
+        "checks": checks
+    })))
+}
+
+async fn export_deposits(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<DepositExportQuery>,
+) -> Result<Response, Response> {
+    auth_tenant(&state, &headers).map_err(map_err)?;
+    require_gate(&state).await.map_err(map_err)?;
+    let format = query.format.as_deref().unwrap_or("ndjson").to_lowercase();
+    if format != "ndjson" && format != "csv" {
+        return Err(api_error(StatusCode::BAD_REQUEST, "format must be ndjson or csv"));
+    }
+    let limit = query.limit.unwrap_or(1000).clamp(1, EXPORT_MAX_ROWS);
+    let ledger = state.deposit_ledger.lock().await;
+    let items = ledger
+        .list_deposits(
+            query.address.as_deref(),
+            query.state.as_deref(),
+            limit,
+            0,
+        )
+        .map_err(map_err)?;
+    if format == "csv" {
+        let body = deposits_to_csv(&items);
+        return Ok((
+            StatusCode::OK,
+            [
+                (axum::http::header::CONTENT_TYPE, "text/csv"),
+                (
+                    axum::http::header::CONTENT_DISPOSITION,
+                    "attachment; filename=deposits.csv",
+                ),
+            ],
+            body,
+        )
+            .into_response());
+    }
+    let mut body = String::new();
+    for item in &items {
+        let line = serde_json::to_string(item).map_err(|err| map_err(EngineError::Message(err.to_string())))?;
+        body.push_str(&line);
+        body.push('\n');
+    }
+    Ok((
+        StatusCode::OK,
+        [
+            (axum::http::header::CONTENT_TYPE, "application/x-ndjson"),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                "attachment; filename=deposits.ndjson",
+            ),
+        ],
+        body,
+    )
+        .into_response())
+}
+
+async fn receiver_stats(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, Response> {
+    auth_tenant(&state, &headers).map_err(map_err)?;
+    Ok(Json(receiver_inbox_count(&state.config.receiver_database)))
+}
+
+async fn webhook_verify(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<WebhookVerifyBody>,
+) -> Result<Json<serde_json::Value>, Response> {
+    auth_tenant(&state, &headers).map_err(map_err)?;
+    let secret = state
+        .config
+        .webhook_secret
+        .as_deref()
+        .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "INTEGRATOR_WEBHOOK_SECRET not configured"))?;
+    let valid = verify_hmac_sha256_hex(secret, &body.body, &body.signature);
+    Ok(Json(serde_json::json!({ "ok": valid, "algorithm": "sha256" })))
+}
+
+fn json_check(name: &str, ok: bool, detail: impl Into<String>) -> serde_json::Value {
+    serde_json::json!({
+        "name": name,
+        "ok": ok,
+        "detail": detail.into()
+    })
+}
+
+fn receiver_inbox_count(path: &StdPath) -> serde_json::Value {
+    if !path.is_file() {
+        return serde_json::json!({
+            "ok": false,
+            "count": 0,
+            "database": path.display().to_string(),
+            "error": "receiver database missing"
+        });
+    }
+    match OutboxReceiverStore::open(path) {
+        Ok(store) => match store.count() {
+            Ok(count) => serde_json::json!({
+                "ok": true,
+                "count": count,
+                "database": path.display().to_string()
+            }),
+            Err(err) => serde_json::json!({
+                "ok": false,
+                "count": 0,
+                "database": path.display().to_string(),
+                "error": err.to_string()
+            }),
+        },
+        Err(err) => serde_json::json!({
+            "ok": false,
+            "count": 0,
+            "database": path.display().to_string(),
+            "error": err.to_string()
+        }),
+    }
+}
+
+fn deposits_to_csv(items: &[DepositRecord]) -> String {
+    let mut out = String::from(
+        "txId,outputIndex,address,amountSompi,state,blockDaaScore,isCoinbase,firstSeenDaa,lastSeenDaa,creditedDaa,reversedDaa,reversalReason\n",
+    );
+    for item in items {
+        out.push_str(&csv_field(&item.tx_id));
+        out.push(',');
+        out.push_str(&item.output_index.to_string());
+        out.push(',');
+        out.push_str(&csv_field(&item.address));
+        out.push(',');
+        out.push_str(&item.amount_sompi.to_string());
+        out.push(',');
+        out.push_str(&csv_field(&item.state));
+        out.push(',');
+        out.push_str(&item.block_daa_score.to_string());
+        out.push(',');
+        out.push_str(if item.is_coinbase { "true" } else { "false" });
+        out.push(',');
+        out.push_str(&item.first_seen_daa.to_string());
+        out.push(',');
+        out.push_str(&item.last_seen_daa.to_string());
+        out.push(',');
+        out.push_str(
+            &item
+                .credited_daa
+                .map(|value| value.to_string())
+                .unwrap_or_default(),
+        );
+        out.push(',');
+        out.push_str(
+            &item
+                .reversed_daa
+                .map(|value| value.to_string())
+                .unwrap_or_default(),
+        );
+        out.push(',');
+        out.push_str(&csv_field(
+            item.reversal_reason.as_deref().unwrap_or(""),
+        ));
+        out.push('\n');
+    }
+    out
+}
+
+fn csv_field(value: &str) -> String {
+    if value.contains(',') || value.contains('"') || value.contains('\n') {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_string()
+    }
+}
+
+fn verify_hmac_sha256_hex(secret: &str, body: &str, signature: &str) -> bool {
+    let normalized = signature.trim().strip_prefix("sha256=").unwrap_or(signature.trim());
+    let expected = hmac_sha256_hex(secret, body);
+    normalized.eq_ignore_ascii_case(&expected)
 }
 
 async fn webhook_test(
@@ -772,6 +1049,7 @@ mod tests {
                 withdrawal_database,
                 watchlist_path,
                 evidence_dir,
+                receiver_database: dir.path().join("receiver.sqlite"),
                 api_keys,
                 webhook_secret: Some("webhook-test-secret".into()),
                 confirmation_daa: 10,
@@ -856,6 +1134,81 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["pilotWeek"], 1);
         assert_eq!(json["tenant"], "pilot");
+    }
+
+    #[test]
+    fn verify_hmac_accepts_sha256_prefix() {
+        let secret = "webhook-test-secret";
+        let body = r#"{"schemaVersion":1}"#;
+        let sig = format!("sha256={}", hmac_sha256_hex(secret, body));
+        assert!(verify_hmac_sha256_hex(secret, body, &sig));
+        assert!(!verify_hmac_sha256_hex(secret, body, "deadbeef"));
+    }
+
+    #[test]
+    fn deposits_csv_escapes_commas() {
+        let record = DepositRecord {
+            tx_id: "tx".into(),
+            output_index: 0,
+            address: "kaspatest:abc".into(),
+            amount_sompi: 1,
+            block_daa_score: 1,
+            is_coinbase: false,
+            state: "credited".into(),
+            first_seen_daa: 1,
+            last_seen_daa: 2,
+            credited_daa: Some(2),
+            reversed_daa: None,
+            reversal_reason: Some("orphan, proof".into()),
+        };
+        let csv = deposits_to_csv(&[record]);
+        assert!(csv.contains("\"orphan, proof\""));
+    }
+
+    #[tokio::test]
+    async fn selftest_lists_checks() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = test_state(&dir);
+        let evidence = dir.path().join("evidence/evidence_test.json");
+        std::fs::write(&evidence, "{}").unwrap();
+        let app = build_router(state);
+        let response = app
+            .oneshot(
+                Request::get("/v1/pilot/selftest")
+                    .header("x-integrator-key", "test-secret-key")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(json["checks"].as_array().unwrap().len() >= 5);
+    }
+
+    #[tokio::test]
+    async fn webhook_verify_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = build_router(test_state(&dir));
+        let payload = r#"{"event":"test"}"#;
+        let signature = format!("sha256={}", hmac_sha256_hex("webhook-test-secret", payload));
+        let response = app
+            .oneshot(
+                Request::post("/v1/webhooks/verify")
+                    .header("x-integrator-key", "test-secret-key")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({ "body": payload, "signature": signature }).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(json["ok"].as_bool().unwrap());
     }
 
     #[tokio::test]

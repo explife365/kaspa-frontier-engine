@@ -44,6 +44,14 @@ pub struct DepositRecord {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct OutboxStats {
+    pub unacknowledged: u64,
+    pub dead_lettered: u64,
+    pub pending_delivery: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OutboxEventStatus {
     #[serde(flatten)]
     pub event: LedgerEvent,
@@ -487,6 +495,28 @@ impl DepositLedger {
             )
             .optional()
             .map_err(EngineError::from)
+    }
+
+    pub fn outbox_stats(&self) -> Result<OutboxStats> {
+        let unacknowledged: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM deposit_outbox WHERE acknowledged=0",
+            [],
+            |row| row.get(0),
+        )?;
+        let dead_lettered: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM deposit_outbox WHERE acknowledged=0 AND dead_lettered=1",
+            [],
+            |row| row.get(0),
+        )?;
+        let unack = u64::try_from(unacknowledged)
+            .map_err(|_| EngineError::Message("invalid unacknowledged outbox count".into()))?;
+        let dead = u64::try_from(dead_lettered)
+            .map_err(|_| EngineError::Message("invalid dead-letter outbox count".into()))?;
+        Ok(OutboxStats {
+            unacknowledged: unack,
+            dead_lettered: dead,
+            pending_delivery: unack.saturating_sub(dead),
+        })
     }
 
     pub fn deposit_state_counts(&self) -> Result<std::collections::HashMap<String, u64>> {
